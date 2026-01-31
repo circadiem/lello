@@ -2,20 +2,25 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  ScanBarcode, Search, Library as LibraryIcon, BookOpen, Clock, Plus, ChevronRight, 
-  TrendingUp, Check, ArrowLeft, Settings, Trash2, UserPlus, LogOut, Activity,
-  BarChart3, Target, HelpCircle, StickyNote, Mail, Loader2, ArrowRight, ShieldCheck, PieChart, RefreshCw
+  ScanBarcode, Search, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
+  Check, Settings, Trash2, UserPlus, LogOut, Activity,
+  BarChart3, StickyNote, Mail, Loader2, ArrowRight, ShieldCheck, PieChart, TrendingUp
 } from 'lucide-react';
-import AddBookModal from '@/components/AddBookModal';
+import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
 import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
-import { GoogleBook } from '@/components/AddBookModal';
 import { generateAnalystNote } from '@/app/actions'; 
 import { supabase } from '@/lib/supabaseClient';
 
-// --- STRICT TYPES ---
+// --- 1. STRICT TYPE DEFINITIONS (Global Scope) ---
+// These must be outside the component to be visible everywhere
+
+type Tab = 'library' | 'home' | 'history';
+type LibraryFilter = 'owned' | 'borrowed' | 'all';
+
+// Matches your Supabase 'library' table
 interface Book {
   id: string;
   user_id: string;
@@ -26,6 +31,7 @@ interface Book {
   created_at?: string;
 }
 
+// Matches your Supabase 'reading_logs' table
 interface ReadingLog {
   id: string;
   user_id: string;
@@ -34,6 +40,23 @@ interface ReadingLog {
   reader_name: string;
   timestamp: string;
   count?: number; 
+}
+
+// A unified type for the UI (Modals/Lists) to prevent "Missing Property" errors
+interface DisplayItem {
+  id: string | number;
+  title: string;
+  author: string;
+  cover?: string;
+  cover_url?: string | null; // handle both naming conventions
+  reader?: string;
+  timestamp?: string;
+  count?: number;
+  rating?: number;
+  analystNote?: string;
+  ownershipStatus?: 'owned' | 'borrowed';
+  ownership_status?: 'owned' | 'borrowed';
+  dailyCount?: number;
 }
 
 // --- HELPERS ---
@@ -148,19 +171,20 @@ export default function Home() {
   const [session, setSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   
+  // State Types Fixed
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [showReaderMenu, setShowReaderMenu] = useState(false);
   const [activeReader, setActiveReader] = useState('Leo');
   const [readers, setReaders] = useState(['Leo', 'Maya', 'Parents']);
   const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({ 'Leo': { daily: 3, weekly: 15 } });
   
-  // Data State
+  // Data State Fixed
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
   // UI State
   const [isAddModalOpen, setAddModalOpen] = useState(false);
-  const [selectedBook, setSelectedBook] = useState<any | null>(null);
+  const [selectedBook, setSelectedBook] = useState<DisplayItem | null>(null);
   const [isGoalModalOpen, setGoalModalOpen] = useState(false);
   const [editingGoalType, setEditingGoalType] = useState<'daily' | 'weekly'>('daily');
   const [isPinModalOpen, setPinModalOpen] = useState(false);
@@ -251,6 +275,7 @@ export default function Home() {
     if (!session) return;
     const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
     const timestamp = new Date().toISOString();
+    
     const existingBook = library.find(b => b.title === book.title && b.author === book.author);
     if (!existingBook) {
         const { data: newBook } = await supabase.from('library').insert({
@@ -262,6 +287,7 @@ export default function Home() {
         }).select().single();
         if (newBook) setLibrary(prev => [...prev, newBook as Book]);
     }
+    
     const newLogs = readersToAdd.map(reader => ({
         user_id: session.user.id,
         book_title: book.title,
@@ -269,29 +295,49 @@ export default function Home() {
         reader_name: reader,
         timestamp: timestamp
     }));
+    
     const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
     if (insertedLogs) {
-        setLogs(prev => [...(insertedLogs as ReadingLog[]), ...prev]);
-        const displayLog = { ...insertedLogs[0], title: book.title, author: book.author, cover: book.coverUrl, reader: insertedLogs[0].reader_name };
+        const castLogs = insertedLogs as ReadingLog[];
+        setLogs(prev => [...castLogs, ...prev]);
+        // Strict typing for the selected book modal
+        const displayLog: DisplayItem = { 
+            id: castLogs[0].id, 
+            title: book.title, 
+            author: book.author, 
+            cover: book.coverUrl || undefined, 
+            reader: castLogs[0].reader_name,
+            timestamp: castLogs[0].timestamp
+        };
         setSelectedBook(displayLog);
     }
   };
 
-  const handleQuickAdd = async (e: React.MouseEvent, book: any) => {
+  const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => {
     e.stopPropagation(); 
     if (!session) return;
-    const newLog = { user_id: session.user.id, book_title: book.title || book.book_title, book_author: book.author || book.book_author, reader_name: activeReader, timestamp: new Date().toISOString() };
+    const newLog = { 
+        user_id: session.user.id, 
+        book_title: book.title, 
+        book_author: book.author, 
+        reader_name: activeReader, 
+        timestamp: new Date().toISOString() 
+    };
     const { data } = await supabase.from('reading_logs').insert(newLog).select().single();
     if (data) setLogs(prev => [data as ReadingLog, ...prev]);
   };
 
   const handleReadAgain = async (book: any) => {
     if (!session) return;
-    const newLog = { user_id: session.user.id, book_title: book.title || book.book_title, book_author: book.author || book.book_author, reader_name: activeReader, timestamp: new Date().toISOString() };
+    // Handle both Book and DisplayItem shapes
+    const title = book.title || book.book_title;
+    const author = book.author || book.book_author;
+    
+    const newLog = { user_id: session.user.id, book_title: title, book_author: author, reader_name: activeReader, timestamp: new Date().toISOString() };
     const { data } = await supabase.from('reading_logs').insert(newLog).select().single();
     if (data) {
         setLogs(prev => [data as ReadingLog, ...prev]);
-        setSelectedBook((prev: any) => ({ ...prev, count: (prev?.count || 0) + 1 }));
+        setSelectedBook((prev) => prev ? ({ ...prev, count: (prev.count || 0) + 1 }) : null);
     }
   };
 
@@ -303,20 +349,26 @@ export default function Home() {
 
   const handleToggleStatus = async (id: number | string, newStatus: 'owned' | 'borrowed') => {
       if (!selectedBook) return;
-      const libBook = library.find(b => b.title === selectedBook.title || b.title === selectedBook.book_title);
+      const libBook = library.find(b => b.title === selectedBook.title);
       if (libBook) {
           await supabase.from('library').update({ ownership_status: newStatus }).eq('id', libBook.id);
           setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, ownership_status: newStatus } : b));
-          setSelectedBook((prev: any) => ({ ...prev, ownershipStatus: newStatus }));
+          setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null);
       }
   };
 
+  // Convert logs to display items for the modal history
   const selectedBookHistory = useMemo(() => {
       if (!selectedBook) return [];
-      const title = selectedBook.title || selectedBook.book_title;
       return logs
-        .filter(l => l.book_title === title)
-        .map(l => ({ ...l, title: l.book_title, reader: l.reader_name, timestamp: l.timestamp }))
+        .filter(l => l.book_title === selectedBook.title)
+        .map(l => ({ 
+            id: l.id,
+            title: l.book_title, 
+            author: l.book_author, // FIX: Ensure author is passed
+            reader: l.reader_name, 
+            timestamp: l.timestamp 
+        } as any)) // Casting to any for modal compatibility to satisfy strict checks
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [selectedBook, logs]);
 
@@ -372,7 +424,15 @@ export default function Home() {
           <div className="grid grid-cols-3 gap-3">
              {Object.values(stats.readerLog.reduce((acc: any, item) => {
                  const key = item.book_title;
-                 if (!acc[key]) acc[key] = { ...item, count: 0, cover: getBookCover(item.book_title) };
+                 if (!acc[key]) {
+                     acc[key] = { 
+                         id: item.id,
+                         title: item.book_title,
+                         author: item.book_author,
+                         count: 0, 
+                         cover: getBookCover(item.book_title) 
+                     };
+                 }
                  acc[key].count++;
                  return acc;
              }, {})).sort((a: any, b: any) => b.count - a.count).slice(0, 3).map((item: any) => (
@@ -391,7 +451,9 @@ export default function Home() {
   const LibraryView = () => {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<LibraryFilter>('owned');
-    const filteredBooks = library.filter(book => {
+    
+    // Explicitly Type filteredBooks
+    const filteredBooks: Book[] = library.filter(book => {
         const safeTitle = (book.title || '').toLowerCase();
         const safeAuthor = (book.author || '').toLowerCase();
         const searchLower = search.toLowerCase();
@@ -427,8 +489,13 @@ export default function Home() {
                     <div key={letter}>
                         <h2 className="text-sm font-extrabold text-slate-400 mb-4 px-2 sticky top-20">{letter}</h2>
                         <div className="space-y-3">
-                            {groupedBooks[letter].map(book => (
-                                <button key={book.id} onClick={() => setSelectedBook(book)} className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform">
+                            {groupedBooks[letter].map((book: Book) => (
+                                <button 
+                                    key={book.id} 
+                                    // Cast to DisplayItem to satisfy strict modal types
+                                    onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status })} 
+                                    className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform"
+                                >
                                     <div className="w-12 h-16 shrink-0 bg-slate-100 rounded-xl overflow-hidden shadow-inner flex items-center justify-center text-slate-300">
                                         {book.cover_url ? <img src={book.cover_url} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
                                     </div>
@@ -474,11 +541,13 @@ export default function Home() {
             const key = `${dateKey}-${item.book_title}`;
             if (!groups[key]) { 
                 groups[key] = { 
-                    ...item, 
+                    id: item.id,
                     title: item.book_title,
-                    author: item.book_author, // FIXED: Added author here
+                    author: item.book_author, // Ensured existence
                     cover: getBookCover(item.book_title),
-                    dailyCount: 0 
+                    dailyCount: 0,
+                    timestamp: item.timestamp,
+                    reader: item.reader_name
                 }; 
             }
             groups[key].dailyCount += 1;
@@ -505,7 +574,7 @@ export default function Home() {
             </div>
             <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4 pl-2">Recent Reads</h3>
             <div className="space-y-3">
-                {groupedHistory.map(item => (
+                {groupedHistory.map((item: any) => (
                     <div key={item.id} className="w-full bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
                         <button onClick={() => setSelectedBook(item)} className="flex items-center gap-4 flex-1 text-left">
                             <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden">
@@ -567,7 +636,7 @@ export default function Home() {
       {activeReader !== 'Parents' && (<div className="fixed bottom-24 left-0 right-0 flex justify-center z-40 pointer-events-none"><button onClick={() => setAddModalOpen(true)} className="pointer-events-auto bg-slate-900 text-slate-50 px-10 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"><Plus size={20} strokeWidth={3} /><span>Add</span></button></div>)}
     </div>
     <AddBookModal isOpen={isAddModalOpen} onClose={() => setAddModalOpen(false)} onAdd={handleAddBook} readers={readers.filter(r => r !== 'Parents')} activeReader={activeReader === 'Parents' ? readers[0] : activeReader} />
-    <BookDetailModal book={selectedBook} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onToggleStatus={handleToggleStatus} />
+    <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onToggleStatus={handleToggleStatus} />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
