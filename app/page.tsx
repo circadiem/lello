@@ -15,7 +15,7 @@ import { GoogleBook } from '@/components/AddBookModal';
 import { generateAnalystNote } from '@/app/actions'; 
 import { supabase } from '@/lib/supabaseClient';
 
-// --- STRICT TYPES (This fixes the Vercel Build Error) ---
+// --- STRICT TYPES ---
 interface Book {
   id: string;
   user_id: string;
@@ -35,17 +35,6 @@ interface ReadingLog {
   timestamp: string;
   count?: number; 
 }
-
-interface DisplayLog extends ReadingLog {
-  title: string;
-  author: string;
-  cover: string | null | undefined;
-  reader: string;
-  dailyCount?: number;
-}
-
-type Tab = 'library' | 'home' | 'history';
-type LibraryFilter = 'owned' | 'borrowed' | 'all';
 
 // --- HELPERS ---
 const isToday = (isoString?: string) => {
@@ -165,8 +154,7 @@ export default function Home() {
   const [readers, setReaders] = useState(['Leo', 'Maya', 'Parents']);
   const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({ 'Leo': { daily: 3, weekly: 15 } });
   
-  // Data State (Synced with DB)
-  // FIX: We now explicitly tell React these are Arrays of 'Book' and 'ReadingLog'
+  // Data State
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
@@ -414,14 +402,14 @@ export default function Home() {
         return matchesSearch;
     }).sort((a, b) => (getLastName(a.author || '').localeCompare(getLastName(b.author || ''))));
     
-    // FIX: Explicitly tell TypeScript that we are building a dictionary of Book Arrays
+    // Explicitly tell TypeScript that we are building a dictionary of Book Arrays
     const groupedBooks = filteredBooks.reduce((groups, book) => {
         const lastName = getLastName(book.author || 'Unknown');
         const letter = lastName.charAt(0).toUpperCase();
         if (!groups[letter]) groups[letter] = [];
         groups[letter].push(book);
         return groups;
-    }, {} as Record<string, Book[]>); // <--- This 'Book[]' type definition fixes the build error
+    }, {} as Record<string, Book[]>);
     
     const sortedKeys = Object.keys(groupedBooks).sort();
 
@@ -488,6 +476,7 @@ export default function Home() {
                 groups[key] = { 
                     ...item, 
                     title: item.book_title,
+                    author: item.book_author, // FIXED: Added author here
                     cover: getBookCover(item.book_title),
                     dailyCount: 0 
                 }; 
