@@ -9,8 +9,11 @@ export const metadata: Metadata = {
   title: "Lello",
   description: "Family Reading Tracker",
   manifest: "/manifest.json",
-  // We removed the 'icons' block here because Next.js 
-  // will now auto-detect 'apple-icon.png' and 'icon.png'
+  icons: {
+    icon: "/icon.png",
+    // We add ?v=2 to force iOS to re-fetch the image
+    apple: "/icon.png?v=2", 
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
