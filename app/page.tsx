@@ -247,25 +247,6 @@ const LandingPage = () => {
     );
 };
 
-
-    return (
-        <div className="min-h-screen bg-slate-50 flex flex-col">
-            <nav className="flex justify-between items-center px-8 py-6 max-w-7xl mx-auto w-full">
-                <div className="flex items-center gap-2"><div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white"><TrendingUp size={18} strokeWidth={3} /></div><span className="font-extrabold text-xl tracking-tight text-slate-900">Lello</span></div>
-            </nav>
-            <main className="flex-1 flex flex-col items-center justify-center px-6 text-center max-w-3xl mx-auto pb-20 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-extrabold uppercase tracking-widest mb-8"><span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span></span>Beta Access Open</div>
-                <h1 className="text-5xl sm:text-7xl font-extrabold text-slate-900 tracking-tight mb-6 leading-tight">Manage your family's <br className="hidden sm:block" /><span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">intellectual assets.</span></h1>
-                <p className="text-lg text-slate-500 font-medium mb-10 max-w-xl leading-relaxed">Treat reading like the investment it is. Track volume, analyze trends, and build a compounding library of knowledge.</p>
-                <form onSubmit={handleLogin} className="w-full max-w-sm space-y-3">
-                    <div className="relative"><input type="email" placeholder="name@example.com" className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-6 text-slate-900 font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 shadow-sm transition-all" value={email} onChange={(e) => setEmail(e.target.value)} required /><Mail className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={20} /></div>
-                    <button disabled={loading} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl shadow-slate-900/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">{loading ? <Loader2 className="animate-spin" /> : <>Get Access <ArrowRight size={18} /></>}</button>
-                </form>
-            </main>
-        </div>
-    );
-};
-
 // --- MAIN APP ---
 export default function Home() {
   const [session, setSession] = useState<any>(null);
