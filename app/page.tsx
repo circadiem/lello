@@ -15,7 +15,35 @@ import { GoogleBook } from '@/components/AddBookModal';
 import { generateAnalystNote } from '@/app/actions'; 
 import { supabase } from '@/lib/supabaseClient';
 
-// --- TYPES ---
+// --- STRICT TYPES (This fixes the Vercel Build Error) ---
+interface Book {
+  id: string;
+  user_id: string;
+  title: string;
+  author: string;
+  cover_url: string | null;
+  ownership_status: 'owned' | 'borrowed';
+  created_at?: string;
+}
+
+interface ReadingLog {
+  id: string;
+  user_id: string;
+  book_title: string;
+  book_author: string;
+  reader_name: string;
+  timestamp: string;
+  count?: number; 
+}
+
+interface DisplayLog extends ReadingLog {
+  title: string;
+  author: string;
+  cover: string | null | undefined;
+  reader: string;
+  dailyCount?: number;
+}
+
 type Tab = 'library' | 'home' | 'history';
 type LibraryFilter = 'owned' | 'borrowed' | 'all';
 
@@ -138,8 +166,9 @@ export default function Home() {
   const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({ 'Leo': { daily: 3, weekly: 15 } });
   
   // Data State (Synced with DB)
-  const [library, setLibrary] = useState<any[]>([]); 
-  const [logs, setLogs] = useState<any[]>([]);       
+  // FIX: We now explicitly tell React these are Arrays of 'Book' and 'ReadingLog'
+  const [library, setLibrary] = useState<Book[]>([]); 
+  const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
   // UI State
   const [isAddModalOpen, setAddModalOpen] = useState(false);
@@ -149,7 +178,6 @@ export default function Home() {
   const [isPinModalOpen, setPinModalOpen] = useState(false);
   const [isChildModalOpen, setChildModalOpen] = useState(false);
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   // --- INITIALIZE ---
   useEffect(() => {
@@ -175,9 +203,9 @@ export default function Home() {
           setReaderGoals(profile.goals || {});
       }
       const { data: libData } = await supabase.from('library').select('*');
-      if (libData) setLibrary(libData);
+      if (libData) setLibrary(libData as Book[]);
       const { data: logData } = await supabase.from('reading_logs').select('*');
-      if (logData) setLogs(logData);
+      if (logData) setLogs(logData as ReadingLog[]);
   };
 
   // --- STATS ENGINE ---
@@ -186,9 +214,9 @@ export default function Home() {
     const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
     const dailyCount = readerLog.filter(item => isToday(item.timestamp)).length; 
     const weeklyCount = readerLog.filter(item => isThisWeek(item.timestamp)).length;
-    const uniqueBooks = new Set(readerLog.map(b => `${b.title}-${b.author}`)).size;
+    const uniqueBooks = new Set(readerLog.map(b => `${b.book_title}-${b.book_author}`)).size;
     return { dailyCount, weeklyCount, uniqueBooks, readerLog, goals: currentGoals };
-  }, [logs, library, activeReader, readerGoals]);
+  }, [logs, activeReader, readerGoals]);
 
   // --- ACTIONS ---
   const handleReaderChangeRequest = (name: string) => {
@@ -219,8 +247,6 @@ export default function Home() {
   };
   const handleResetApp = async () => { 
       if (confirm("WARNING: Delete all data? This cannot be undone.")) { 
-          // Note: In a real app, you'd call a delete query here.
-          // For now, we'll just reload as a placeholder or you can implement the delete logic.
           window.location.reload(); 
       } 
   };
@@ -246,7 +272,7 @@ export default function Home() {
             cover_url: book.coverUrl,
             ownership_status: 'owned'
         }).select().single();
-        if (newBook) setLibrary(prev => [...prev, newBook]);
+        if (newBook) setLibrary(prev => [...prev, newBook as Book]);
     }
     const newLogs = readersToAdd.map(reader => ({
         user_id: session.user.id,
@@ -257,7 +283,7 @@ export default function Home() {
     }));
     const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
     if (insertedLogs) {
-        setLogs(prev => [...insertedLogs, ...prev]);
+        setLogs(prev => [...(insertedLogs as ReadingLog[]), ...prev]);
         const displayLog = { ...insertedLogs[0], title: book.title, author: book.author, cover: book.coverUrl, reader: insertedLogs[0].reader_name };
         setSelectedBook(displayLog);
     }
@@ -268,7 +294,7 @@ export default function Home() {
     if (!session) return;
     const newLog = { user_id: session.user.id, book_title: book.title || book.book_title, book_author: book.author || book.book_author, reader_name: activeReader, timestamp: new Date().toISOString() };
     const { data } = await supabase.from('reading_logs').insert(newLog).select().single();
-    if (data) setLogs(prev => [data, ...prev]);
+    if (data) setLogs(prev => [data as ReadingLog, ...prev]);
   };
 
   const handleReadAgain = async (book: any) => {
@@ -276,7 +302,7 @@ export default function Home() {
     const newLog = { user_id: session.user.id, book_title: book.title || book.book_title, book_author: book.author || book.book_author, reader_name: activeReader, timestamp: new Date().toISOString() };
     const { data } = await supabase.from('reading_logs').insert(newLog).select().single();
     if (data) {
-        setLogs(prev => [data, ...prev]);
+        setLogs(prev => [data as ReadingLog, ...prev]);
         setSelectedBook((prev: any) => ({ ...prev, count: (prev?.count || 0) + 1 }));
     }
   };
@@ -378,18 +404,25 @@ export default function Home() {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<LibraryFilter>('owned');
     const filteredBooks = library.filter(book => {
-        const matchesSearch = book.title.toLowerCase().includes(search.toLowerCase()) || (book.author && book.author.toLowerCase().includes(search.toLowerCase()));
+        const safeTitle = (book.title || '').toLowerCase();
+        const safeAuthor = (book.author || '').toLowerCase();
+        const searchLower = search.toLowerCase();
+        const matchesSearch = safeTitle.includes(searchLower) || safeAuthor.includes(searchLower);
+        
         if (filter === 'owned') return matchesSearch && (book.ownership_status === 'owned' || !book.ownership_status);
         if (filter === 'borrowed') return matchesSearch && book.ownership_status === 'borrowed';
         return matchesSearch;
     }).sort((a, b) => (getLastName(a.author || '').localeCompare(getLastName(b.author || ''))));
+    
+    // FIX: Explicitly tell TypeScript that we are building a dictionary of Book Arrays
     const groupedBooks = filteredBooks.reduce((groups, book) => {
         const lastName = getLastName(book.author || 'Unknown');
         const letter = lastName.charAt(0).toUpperCase();
         if (!groups[letter]) groups[letter] = [];
         groups[letter].push(book);
         return groups;
-    }, {} as Record<string, typeof library>);
+    }, {} as Record<string, Book[]>); // <--- This 'Book[]' type definition fixes the build error
+    
     const sortedKeys = Object.keys(groupedBooks).sort();
 
     return (
@@ -511,7 +544,6 @@ export default function Home() {
       <header className="fixed top-0 left-0 right-0 bg-slate-50/90 backdrop-blur-md z-[100] flex items-center justify-between px-6 py-4">
         <button onClick={() => setAddModalOpen(true)} className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"><ScanBarcode size={28} className="text-slate-900" /></button>
         <div className="flex items-center gap-3">
-            <button className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"><Search size={28} className="text-slate-400" /></button>
             <div className="relative">
                 <button onClick={() => setShowReaderMenu(!showReaderMenu)} className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm ring-1 ring-slate-200 active:scale-90 transition-transform">
                     <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeReader}`} className="w-full h-full object-cover bg-orange-100" />
