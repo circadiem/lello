@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  ScanBarcode, Search, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
-  Check, Settings, Trash2, UserPlus, LogOut, Activity,
-  BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp
-} from 'lucide-react';
+    ScanBarcode, Search, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
+    Check, Settings, Trash2, UserPlus, LogOut, Activity,
+    BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
+    ShieldCheck, ArrowRight 
+  } from 'lucide-react';  
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
