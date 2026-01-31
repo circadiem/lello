@@ -4,18 +4,18 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ScanBarcode, Search, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
   Check, Settings, Trash2, UserPlus, LogOut, Activity,
-  BarChart3, StickyNote, Mail, Loader2, ArrowRight, ShieldCheck, PieChart, TrendingUp
+  BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp
 } from 'lucide-react';
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
 import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
+import AvatarModal from '@/components/AvatarModal'; // <--- NEW IMPORT
 import { generateAnalystNote } from '@/app/actions'; 
 import { supabase } from '@/lib/supabaseClient';
 
 // --- 1. STRICT TYPE DEFINITIONS (Global Scope) ---
-// These must be outside the component to be visible everywhere
 
 type Tab = 'library' | 'home' | 'history';
 type LibraryFilter = 'owned' | 'borrowed' | 'all';
@@ -80,6 +80,12 @@ const isThisWeek = (isoString?: string) => {
 const getLastName = (fullName: string) => {
     const parts = fullName.trim().split(' ');
     return parts.length > 0 ? parts[parts.length - 1] : fullName;
+};
+
+// --- NEW: AVATAR HELPER ---
+const getAvatarUrl = (name: string, map: Record<string, string>) => {
+    if (map[name]) return `/avatars/${map[name]}`;
+    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`;
 };
 
 // --- COMPONENTS ---
@@ -171,14 +177,17 @@ export default function Home() {
   const [session, setSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   
-  // State Types Fixed
+  // App State
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [showReaderMenu, setShowReaderMenu] = useState(false);
   const [activeReader, setActiveReader] = useState('Leo');
   const [readers, setReaders] = useState(['Leo', 'Maya', 'Parents']);
   const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({ 'Leo': { daily: 3, weekly: 15 } });
   
-  // Data State Fixed
+  // NEW: State for Avatars
+  const [readerAvatars, setReaderAvatars] = useState<Record<string, string>>({});
+
+  // Data State
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
@@ -190,6 +199,10 @@ export default function Home() {
   const [isPinModalOpen, setPinModalOpen] = useState(false);
   const [isChildModalOpen, setChildModalOpen] = useState(false);
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
+  
+  // NEW: Avatar Modal State
+  const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
+  const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
 
   // --- INITIALIZE ---
   useEffect(() => {
@@ -213,6 +226,8 @@ export default function Home() {
       if (profile) {
           setReaders(profile.readers || ['Leo']);
           setReaderGoals(profile.goals || {});
+          // NEW: Fetch avatars
+          setReaderAvatars(profile.avatars || {}); 
       }
       const { data: libData } = await supabase.from('library').select('*');
       if (libData) setLibrary(libData as Book[]);
@@ -241,15 +256,22 @@ export default function Home() {
       if (pendingReaderChange) { setActiveReader(pendingReaderChange); setPendingReaderChange(null); }
   };
   const handleAddChildClick = () => setChildModalOpen(true);
-  const handleSaveChild = async (name: string) => {
+  
+  // NEW: Handle Save Child with Avatar support
+  const handleSaveChild = async (name: string, avatar: string | null) => {
       if (!readers.includes(name)) {
           const newReaders = [...readers.filter(r => r !== 'Parents'), name, 'Parents'];
           const newGoals = { ...readerGoals, [name]: { daily: 2, weekly: 10 } };
-          await supabase.from('profiles').update({ readers: newReaders, goals: newGoals }).eq('id', session.user.id);
+          const newAvatars = { ...readerAvatars };
+          if (avatar) newAvatars[name] = avatar;
+
+          await supabase.from('profiles').update({ readers: newReaders, goals: newGoals, avatars: newAvatars }).eq('id', session.user.id);
           setReaders(newReaders);
           setReaderGoals(newGoals);
+          setReaderAvatars(newAvatars);
       }
   };
+
   const handleDeleteChild = async (name: string) => {
       if (confirm(`Remove ${name}?`)) {
           const newReaders = readers.filter(r => r !== name);
@@ -269,6 +291,20 @@ export default function Home() {
   };
   const handleGoalSave = (newGoal: number) => handleUpdateChildGoal(activeReader, editingGoalType, newGoal);
   const handleLogout = async () => { await supabase.auth.signOut(); };
+
+  // NEW: Avatar Modal Handlers
+  const handleOpenAvatarModal = (name: string) => {
+      setEditingAvatarFor(name);
+      setAvatarModalOpen(true);
+  };
+
+  const handleSaveAvatar = async (newAvatar: string) => {
+      if (!editingAvatarFor) return;
+      const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar };
+      setReaderAvatars(newAvatars);
+      await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id);
+  };
+
 
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[]) => {
     setAddModalOpen(false);
@@ -385,17 +421,26 @@ export default function Home() {
           <div className="space-y-6">
               <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
                   <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Family Goals & Profiles</h3>
-                  <div className="space-y-6">
-                      {readers.filter(r => r !== 'Parents').map(kid => (
+                  <div className="space-y-4">
+                      {readers.map(kid => (
                           <div key={kid} className="p-4 bg-slate-50 rounded-3xl border border-slate-100">
                               <div className="flex items-center justify-between mb-4">
-                                  <div className="flex items-center gap-3"><img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${kid}`} className="w-10 h-10 rounded-full bg-white shadow-sm" /><span className="font-bold text-slate-900 text-lg">{kid}</span></div>
-                                  <button onClick={() => handleDeleteChild(kid)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><Trash2 size={18} /></button>
+                                  <div className="flex items-center gap-3">
+                                      {/* NEW: Clickable Avatar to Edit */}
+                                      <button onClick={() => handleOpenAvatarModal(kid)} className="relative group">
+                                          <img src={getAvatarUrl(kid, readerAvatars)} className="w-10 h-10 rounded-full bg-white shadow-sm object-cover" />
+                                          <div className="absolute inset-0 bg-black/20 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Edit3 size={12} className="text-white" /></div>
+                                      </button>
+                                      <span className="font-bold text-slate-900 text-lg">{kid}</span>
+                                  </div>
+                                  {kid !== 'Parents' && <button onClick={() => handleDeleteChild(kid)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><Trash2 size={18} /></button>}
                               </div>
-                              <div className="space-y-3">
+                              {kid !== 'Parents' && (
+                              <div className="space-y-3 pl-14">
                                   <div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>DAILY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).daily} books</span></div><input type="range" min="1" max="10" value={(readerGoals[kid] || readerGoals['default']).daily} onChange={(e) => handleUpdateChildGoal(kid, 'daily', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div>
                                   <div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>WEEKLY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).weekly} books</span></div><input type="range" min="5" max="50" step="5" value={(readerGoals[kid] || readerGoals['default']).weekly} onChange={(e) => handleUpdateChildGoal(kid, 'weekly', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div>
                               </div>
+                              )}
                           </div>
                       ))}
                       <button onClick={handleAddChildClick} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:border-slate-400 hover:text-slate-600 transition-all active:scale-95"><UserPlus size={18} /><span>Add Child</span></button>
@@ -604,7 +649,8 @@ export default function Home() {
         <div className="flex items-center gap-3">
             <div className="relative">
                 <button onClick={() => setShowReaderMenu(!showReaderMenu)} className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm ring-1 ring-slate-200 active:scale-90 transition-transform">
-                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeReader}`} className="w-full h-full object-cover bg-orange-100" />
+                    {/* NEW: Header Avatar uses custom logic */}
+                    <img src={getAvatarUrl(activeReader, readerAvatars)} className="w-full h-full object-cover bg-orange-100" />
                 </button>
                 {showReaderMenu && (
                 <>
@@ -639,7 +685,18 @@ export default function Home() {
     <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onToggleStatus={handleToggleStatus} />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
+    
+    {/* NEW: Passed correct handler with signature (name, avatar) */}
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
+    
+    {/* NEW: Avatar Modal */}
+    <AvatarModal 
+        isOpen={isAvatarModalOpen} 
+        onClose={() => setAvatarModalOpen(false)} 
+        onSave={handleSaveAvatar} 
+        currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null}
+        name={editingAvatarFor || ''} 
+    />
     </>
   );
 };
