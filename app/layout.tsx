@@ -1,25 +1,40 @@
+import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
 
-import type { Metadata } from 'next';
-import './globals.css';
+const inter = Inter({ subsets: ["latin"] });
 
+// 1. PWA & Icon Configuration
 export const metadata: Metadata = {
-  title: 'Lello - Reading Tracker',
-  description: 'FinTech style reading tracker for families',
+  title: "Lello",
+  description: "Family Reading Tracker",
+  manifest: "/manifest.json",
+  // We removed the 'icons' block here because Next.js 
+  // will now auto-detect 'apple-icon.png' and 'icon.png'
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Lello",
+  },
+};
+
+// 2. Prevent zooming on mobile inputs (Quality of Life)
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#f8fafc",
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="en">
-      <head>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet" />
-      </head>
-      <body className="bg-slate-50 text-slate-900 antialiased font-sans">
-        {children}
-      </body>
+      <body className={inter.className}>{children}</body>
     </html>
   );
 }
