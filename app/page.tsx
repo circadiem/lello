@@ -12,7 +12,8 @@ import BookDetailModal from '@/components/BookDetailModal';
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
 import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
-import AvatarModal from '@/components/AvatarModal'; // <--- NEW IMPORT
+import AvatarModal from '@/components/AvatarModal';
+import OnboardingWizard from '@/components/OnboardingWizard'; // <--- NEW IMPORT
 import { generateAnalystNote } from '@/app/actions'; 
 import { supabase } from '@/lib/supabaseClient';
 
@@ -252,6 +253,7 @@ const LandingPage = () => {
 export default function Home() {
   const [session, setSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false); // <--- NEW STATE
   
   // App State
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -298,13 +300,26 @@ export default function Home() {
 
   // --- DB FETCH ---
   const fetchData = async (userId: string) => {
+      // 1. Check if profile exists (Updated Logic)
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (profile) {
+      
+      if (!profile) {
+          // If no profile found, trigger onboarding
+          setNeedsOnboarding(true);
+          // Initialize empty defaults to avoid crashes in background
+          setReaders([]);
+      } else {
+          // If profile exists, load normal app data
           setReaders(profile.readers || ['Leo']);
           setReaderGoals(profile.goals || {});
-          // NEW: Fetch avatars
           setReaderAvatars(profile.avatars || {}); 
+          
+          // Ensure activeReader is set correctly if it was empty
+          if (!activeReader && profile.readers && profile.readers.length > 0) {
+              setActiveReader(profile.readers[0]);
+          }
       }
+
       const { data: libData } = await supabase.from('library').select('*');
       if (libData) setLibrary(libData as Book[]);
       const { data: logData } = await supabase.from('reading_logs').select('*');
@@ -324,8 +339,14 @@ export default function Home() {
   // --- ACTIONS ---
   const handleReaderChangeRequest = (name: string) => {
       setShowReaderMenu(false);
-      if (name === 'Parents') { setPendingReaderChange(name); setPinModalOpen(true); } 
-      else { setActiveReader(name); }
+      // Check if last reader (Parent) to trigger pin
+      const isParent = readers.length > 0 && name === readers[readers.length - 1];
+      if (isParent || name === 'Parents') { 
+          setPendingReaderChange(name); 
+          setPinModalOpen(true); 
+      } else { 
+          setActiveReader(name); 
+      }
   };
   const onPinSuccess = () => {
       setPinModalOpen(false);
@@ -336,7 +357,12 @@ export default function Home() {
   // NEW: Handle Save Child with Avatar support
   const handleSaveChild = async (name: string, avatar: string | null) => {
       if (!readers.includes(name)) {
-          const newReaders = [...readers.filter(r => r !== 'Parents'), name, 'Parents'];
+          // Maintain parents at end of list logic
+          // Find 'Parents' or the last item to keep it at the end
+          const parentName = readers.length > 0 ? readers[readers.length - 1] : 'Parents';
+          const kids = readers.slice(0, -1);
+          const newReaders = [...kids, name, parentName];
+
           const newGoals = { ...readerGoals, [name]: { daily: 2, weekly: 10 } };
           const newAvatars = { ...readerAvatars };
           if (avatar) newAvatars[name] = avatar;
@@ -497,7 +523,7 @@ export default function Home() {
           <div className="space-y-6">
               <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
                   <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Family Goals & Profiles</h3>
-                  <div className="space-y-4">
+                  <div className="space-y-6">
                       {readers.map(kid => (
                           <div key={kid} className="p-4 bg-slate-50 rounded-3xl border border-slate-100">
                               <div className="flex items-center justify-between mb-4">
@@ -509,9 +535,13 @@ export default function Home() {
                                       </button>
                                       <span className="font-bold text-slate-900 text-lg">{kid}</span>
                                   </div>
-                                  {kid !== 'Parents' && <button onClick={() => handleDeleteChild(kid)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><Trash2 size={18} /></button>}
+                                  {/* Don't allow deleting the parent/last user easily here without logic checks */}
+                                  {readers.length > 0 && kid !== readers[readers.length - 1] && 
+                                    <button onClick={() => handleDeleteChild(kid)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><Trash2 size={18} /></button>
+                                  }
                               </div>
-                              {kid !== 'Parents' && (
+                              
+                              {readers.length > 0 && kid !== readers[readers.length - 1] && (
                               <div className="space-y-3 pl-14">
                                   <div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>DAILY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).daily} books</span></div><input type="range" min="1" max="10" value={(readerGoals[kid] || readerGoals['default']).daily} onChange={(e) => handleUpdateChildGoal(kid, 'daily', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div>
                                   <div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>WEEKLY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).weekly} books</span></div><input type="range" min="5" max="50" step="5" value={(readerGoals[kid] || readerGoals['default']).weekly} onChange={(e) => handleUpdateChildGoal(kid, 'weekly', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div>
@@ -716,6 +746,8 @@ export default function Home() {
 
   if (loadingSession) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={32} /></div>;
   if (!session) return <LandingPage />;
+  // NEW: Check for onboarding state
+  if (needsOnboarding) return <OnboardingWizard userId={session.user.id} onComplete={() => { setNeedsOnboarding(false); fetchData(session.user.id); }} />;
 
   return (
     <>
@@ -746,18 +778,24 @@ export default function Home() {
         </div>
       </header>
       <main className="mt-20 px-6 max-w-lg mx-auto w-full">
-        {activeReader === 'Parents' ? <ParentDashboard /> : (activeTab === 'library' ? <LibraryView /> : activeTab === 'home' ? <HomeView /> : <HistoryView />)}
+        {/* Logic: if activeReader is last in list (Parent), show Parent Dashboard. Else show views */}
+        {readers.length > 0 && activeReader === readers[readers.length-1] ? <ParentDashboard /> : (activeTab === 'library' ? <LibraryView /> : activeTab === 'home' ? <HomeView /> : <HistoryView />)}
       </main>
-      {activeReader !== 'Parents' && (
+      
+      {/* Bottom Nav: Only show if NOT Parent */}
+      {readers.length > 0 && activeReader !== readers[readers.length-1] && (
       <nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
         <button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button>
         <button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button>
         <button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button>
       </nav>
       )}
-      {activeReader !== 'Parents' && (<div className="fixed bottom-24 left-0 right-0 flex justify-center z-40 pointer-events-none"><button onClick={() => setAddModalOpen(true)} className="pointer-events-auto bg-slate-900 text-slate-50 px-10 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"><Plus size={20} strokeWidth={3} /><span>Add</span></button></div>)}
+
+      {/* Add Button: Only show if NOT Parent */}
+      {readers.length > 0 && activeReader !== readers[readers.length-1] && (<div className="fixed bottom-24 left-0 right-0 flex justify-center z-40 pointer-events-none"><button onClick={() => setAddModalOpen(true)} className="pointer-events-auto bg-slate-900 text-slate-50 px-10 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"><Plus size={20} strokeWidth={3} /><span>Add</span></button></div>)}
     </div>
-    <AddBookModal isOpen={isAddModalOpen} onClose={() => setAddModalOpen(false)} onAdd={handleAddBook} readers={readers.filter(r => r !== 'Parents')} activeReader={activeReader === 'Parents' ? readers[0] : activeReader} />
+    
+    <AddBookModal isOpen={isAddModalOpen} onClose={() => setAddModalOpen(false)} onAdd={handleAddBook} readers={readers.slice(0, -1)} activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader} />
     <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onToggleStatus={handleToggleStatus} />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
