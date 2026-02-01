@@ -14,14 +14,14 @@ interface GoalAdjustmentModalProps {
 export default function GoalAdjustmentModal({ isOpen, onClose, type, currentGoal, onSave }: GoalAdjustmentModalProps) {
   const [value, setValue] = useState(currentGoal);
 
-  // Reset value when modal opens or goal changes externally
+  // Reset value when modal opens or goal changes
   useEffect(() => {
     setValue(currentGoal);
   }, [currentGoal, isOpen]);
 
   if (!isOpen) return null;
 
-  // Set reasonable max limits for the slider
+  // Limits: Daily (1-10), Weekly (1-50)
   const maxVal = type === 'daily' ? 10 : 50;
 
   return (
@@ -68,7 +68,7 @@ export default function GoalAdjustmentModal({ isOpen, onClose, type, currentGoal
                     type="range"
                     min="1"
                     max={maxVal}
-                    step="1"
+                    step="1" // <--- Ensures single integer steps
                     value={value}
                     onChange={(e) => setValue(parseInt(e.target.value))}
                     className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-emerald-500 hover:accent-emerald-400 transition-all"
