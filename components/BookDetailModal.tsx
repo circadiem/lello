@@ -3,7 +3,7 @@
 import React from 'react';
 import { X, BookOpen, Clock, Trash2, RotateCcw, CheckCircle2, StickyNote } from 'lucide-react';
 
-// Reusing the strict types to keep Vercel happy
+// Reusing the strict types
 interface DisplayItem {
   id: string | number;
   title: string;
@@ -29,8 +29,8 @@ interface BookDetailModalProps {
   history: HistoryItem[];
   onClose: () => void;
   onReadAgain: (book: DisplayItem) => void;
-  onRemove: (id: string | number) => void; // Deletes a single log
-  onDeleteAsset?: (title: string) => void; // Deletes the book entirely from library
+  onRemove: (id: string | number) => void; 
+  onDeleteAsset?: (title: string) => void; 
   onToggleStatus: (id: string | number, status: 'owned' | 'borrowed') => void;
 }
 
@@ -40,7 +40,7 @@ export default function BookDetailModal({
     onClose, 
     onReadAgain, 
     onRemove, 
-    onDeleteAsset, // New prop
+    onDeleteAsset, 
     onToggleStatus 
 }: BookDetailModalProps) {
   
@@ -77,6 +77,16 @@ export default function BookDetailModal({
                     <BookOpen size={48} className="text-slate-300" />
                 </div>
             )}
+            
+            {/* UI: Trash Icon Top Left (As requested) */}
+            <button 
+                onClick={handleDeleteLibraryBook} 
+                className="absolute top-4 left-4 p-2 bg-black/20 hover:bg-red-500 text-white hover:text-white rounded-full backdrop-blur-md z-30 transition-all"
+            >
+                <Trash2 size={20} />
+            </button>
+
+            {/* Close Icon Top Right */}
             <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full backdrop-blur-md z-30 transition-all">
                 <X size={20} />
             </button>
@@ -106,24 +116,18 @@ export default function BookDetailModal({
                     Read Again
                 </button>
                 
-                <div className="flex gap-3">
-                    <button 
-                        onClick={() => onToggleStatus(book.id, isBorrowed ? 'owned' : 'borrowed')} 
-                        className={`flex-1 py-3 font-bold rounded-xl border-2 flex items-center justify-center gap-2 transition-colors ${isBorrowed ? 'border-indigo-100 bg-indigo-50 text-indigo-600' : 'border-slate-200 text-slate-500 hover:border-emerald-500 hover:text-emerald-600'}`}
-                    >
-                        {isBorrowed ? <StickyNote size={18} /> : <CheckCircle2 size={18} />}
-                        {isBorrowed ? 'Borrowed' : 'Owned'}
-                    </button>
-                    
-                    {/* Delete Entire Asset Button */}
-                    <button 
-                        onClick={handleDeleteLibraryBook} 
-                        className="flex-1 py-3 font-bold rounded-xl border-2 border-red-100 bg-red-50 text-red-500 flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"
-                    >
-                        <Trash2 size={18} />
-                        Delete Asset
-                    </button>
-                </div>
+                {/* Cleaner Toggle Button */}
+                <button 
+                    onClick={() => onToggleStatus(book.id, isBorrowed ? 'owned' : 'borrowed')} 
+                    className={`w-full py-3 font-bold rounded-xl border flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                        isBorrowed 
+                        ? 'bg-indigo-50 border-indigo-200 text-indigo-600' 
+                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                >
+                    {isBorrowed ? <StickyNote size={18} /> : <CheckCircle2 size={18} />}
+                    <span>{isBorrowed ? 'Currently Borrowed' : 'Owned Copy'}</span>
+                </button>
             </div>
 
             {/* History List */}
