@@ -146,11 +146,14 @@ const LandingPage = () => {
     return (
         <div className="min-h-screen bg-slate-50 flex flex-col">
             <nav className="flex justify-between items-center px-8 py-6 max-w-7xl mx-auto w-full">
-                <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center text-white">
-                        <TrendingUp size={18} strokeWidth={3} />
-                    </div>
-                    <span className="font-extrabold text-xl tracking-tight text-slate-900">Lello</span>
+                <div className="flex items-center gap-3">
+                    {/* App Icon */}
+                    <img 
+                        src="/icon.png" 
+                        alt="Lello Logo" 
+                        className="w-10 h-10 rounded-xl shadow-sm border border-slate-100" 
+                    />
+                    <span className="font-extrabold text-2xl tracking-tight text-slate-900">Lello</span>
                 </div>
             </nav>
             <main className="flex-1 flex flex-col items-center justify-center px-6 text-center max-w-3xl mx-auto pb-20 animate-in fade-in slide-in-from-bottom-8 duration-700">
@@ -161,13 +164,18 @@ const LandingPage = () => {
                     </span>
                     Beta Access Open
                 </div>
+                
+                {/* NEW HEADLINE */}
                 <h1 className="text-5xl sm:text-7xl font-extrabold text-slate-900 tracking-tight mb-6 leading-tight">
-                    Manage your family's <br className="hidden sm:block" />
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">intellectual assets.</span>
+                    Capture every chapter <br className="hidden sm:block" />
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">of their childhood.</span>
                 </h1>
+                
+                {/* NEW SUBHEAD */}
                 <p className="text-lg text-slate-500 font-medium mb-10 max-w-xl leading-relaxed">
-                    Treat reading like the investment it is. Track volume, analyze trends, and build a compounding library of knowledge.
+                    From their first picture book to their first novel. Track the journey, celebrate the milestones, and foster a love for learning.
                 </p>
+
                 <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100">
                     <div className="flex gap-4 mb-6 p-1 bg-slate-50 rounded-xl">
                         <button onClick={() => setIsSignUp(false)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>Log In</button>
@@ -193,6 +201,7 @@ const LandingPage = () => {
         </div>
     );
 };
+
 
 // --- MAIN APP ---
 export default function Home() {
