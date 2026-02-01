@@ -1,183 +1,156 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, BookOpen, Star, Share, Heart, History, Sparkles, Trash2, Home, Library } from 'lucide-react';
+import React from 'react';
+import { X, BookOpen, Clock, Trash2, RotateCcw, CheckCircle2, StickyNote } from 'lucide-react';
 
-interface BookAsset {
-  id: number | string;
+// Reusing the strict types to keep Vercel happy
+interface DisplayItem {
+  id: string | number;
   title: string;
   author: string;
   cover?: string;
-  count?: number;
-  rating?: number;
-  analystNote?: string;
-  timestamp?: string;
+  cover_url?: string | null;
   reader?: string;
-  ownershipStatus?: 'owned' | 'borrowed'; // NEW
+  timestamp?: string;
+  count?: number;
+  ownershipStatus?: 'owned' | 'borrowed';
+}
+
+interface HistoryItem {
+  id: string | number;
+  title: string;
+  author: string;
+  reader: string;
+  timestamp: string;
 }
 
 interface BookDetailModalProps {
-  book: BookAsset | null;
-  history: BookAsset[];
+  book: DisplayItem | null;
+  history: HistoryItem[];
   onClose: () => void;
-  onReadAgain: (book: BookAsset) => void;
-  onRemove: (id: number | string) => void;
-  onToggleStatus: (id: number | string, newStatus: 'owned' | 'borrowed') => void; // NEW
+  onReadAgain: (book: DisplayItem) => void;
+  onRemove: (id: string | number) => void; // Deletes a single log
+  onDeleteAsset?: (title: string) => void; // Deletes the book entirely from library
+  onToggleStatus: (id: string | number, status: 'owned' | 'borrowed') => void;
 }
 
-export default function BookDetailModal({ book, history = [], onClose, onReadAgain, onRemove, onToggleStatus }: BookDetailModalProps) {
-  const [userRating, setUserRating] = useState(book?.rating || 0);
-
+export default function BookDetailModal({ 
+    book, 
+    history, 
+    onClose, 
+    onReadAgain, 
+    onRemove, 
+    onDeleteAsset, // New prop
+    onToggleStatus 
+}: BookDetailModalProps) {
+  
   if (!book) return null;
 
-  const handleDelete = () => {
-    if (window.confirm("Remove this entry?")) {
-      onRemove(book.id);
-    }
-  };
+  const coverImage = book.cover || book.cover_url;
+  const isBorrowed = book.ownershipStatus === 'borrowed';
 
-  const currentStatus = book.ownershipStatus || 'owned'; // Default to owned
-
-  // --- SAFE DATE HELPERS ---
-  const formatDate = (isoString?: string) => {
-    if (!isoString) return 'Unknown Date';
-    if (!isoString.includes('T') && !isoString.includes('-')) return isoString;
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return isoString;
-    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
-  };
-
-  const formatTime = (isoString?: string) => {
-    if (!isoString) return '';
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return '';
-    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric' }).format(date);
+  const handleDeleteLibraryBook = () => {
+      if (confirm(`Delete "${book.title}" from your Library entirely? This cannot be undone.`)) {
+          if (onDeleteAsset) {
+              onDeleteAsset(book.title);
+              onClose();
+          }
+      }
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex flex-col items-center justify-end sm:justify-center pointer-events-none">
-      <div 
-        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity pointer-events-auto"
-        onClick={onClose}
-      />
-      <div className="pointer-events-auto relative w-full max-w-lg h-[92vh] sm:h-[800px] bg-slate-50 rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      
+      <div className="relative w-full max-w-lg h-[90vh] sm:h-auto bg-slate-50 rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300">
         
-        {/* Drag Handle */}
-        <div className="w-full flex justify-center pt-4 pb-2 bg-white/50 backdrop-blur-md z-10">
-          <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
-        </div>
-
-        <div className="flex-1 overflow-y-auto pb-24 no-scrollbar">
-          
-          {/* Header Actions */}
-          <div className="flex justify-between items-center px-6 py-2">
-            <div className="flex gap-2">
-                <button 
-                    onClick={handleDelete}
-                    className="p-2 bg-red-50 border border-red-100 rounded-full text-red-400 hover:bg-red-100 hover:text-red-600 shadow-sm transition-colors active:scale-90"
-                >
-                    <Trash2 size={20} />
-                </button>
-                <button className="p-2 bg-white border border-slate-100 rounded-full text-slate-400 hover:text-slate-900 shadow-sm transition-colors">
-                    <Share size={20} />
-                </button>
-            </div>
-            <button onClick={onClose} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200 transition-colors">
-               <X size={24} />
-            </button>
-          </div>
-
-          {/* Book Hero */}
-          <div className="flex flex-col items-center px-6 mt-2">
-            <div className="w-40 h-60 bg-white rounded-2xl shadow-xl border-4 border-white rotate-1 transition-transform hover:rotate-0 overflow-hidden relative group">
-                {book.cover ? (
-                  <img src={book.cover} alt={book.title} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full bg-slate-200 flex items-center justify-center text-slate-400"><BookOpen size={48} /></div>
-                )}
-            </div>
-            <h2 className="mt-6 text-2xl font-extrabold text-slate-900 text-center leading-tight">{book.title}</h2>
-            <p className="mt-2 text-slate-500 font-medium text-sm">{book.author}</p>
-          </div>
-
-          {/* Stats & Ownership Grid */}
-          <div className="grid grid-cols-2 gap-4 px-6 mt-8">
-            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col items-center justify-center gap-2 text-center">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Asset Status</span>
-              
-              {/* STATUS TOGGLE */}
-              <div className="flex items-center bg-slate-100 rounded-full p-1 mt-1">
-                  <button 
-                    onClick={() => onToggleStatus(book.id, 'owned')}
-                    className={`p-2 rounded-full transition-all ${currentStatus === 'owned' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
-                  >
-                      <Home size={18} />
-                  </button>
-                  <button 
-                    onClick={() => onToggleStatus(book.id, 'borrowed')}
-                    className={`p-2 rounded-full transition-all ${currentStatus === 'borrowed' ? 'bg-indigo-100 text-indigo-600 shadow-sm' : 'text-slate-400'}`}
-                  >
-                      <Library size={18} />
-                  </button>
-              </div>
-              <span className="text-[9px] font-bold text-slate-400 uppercase mt-1">
-                  {currentStatus === 'owned' ? 'Family Owned' : 'Library Book'}
-              </span>
-            </div>
-
-            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col items-center justify-center gap-2 text-center">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Reads</span>
-              <div className="flex items-baseline gap-1">
-                <span className="text-4xl font-extrabold text-slate-900">{history.length}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Analyst Note */}
-          <div className="px-6 mt-6">
-            <div className="bg-indigo-50/50 rounded-3xl p-6 relative overflow-hidden border border-indigo-100">
-                <div className="flex items-center gap-2 mb-3">
-                   {book.analystNote ? <Sparkles size={14} className="text-indigo-500 fill-indigo-500 animate-pulse" /> : <Heart size={14} className="text-indigo-500 fill-indigo-500" />}
-                   <span className="text-[10px] font-bold text-indigo-900 uppercase tracking-widest">{book.analystNote ? 'AI Analyst Thesis' : 'Why We Love It'}</span>
+        {/* Header Image */}
+        <div className="relative h-48 bg-slate-200">
+            {coverImage ? (
+                <>
+                    <div className="absolute inset-0 bg-black/10 z-10" />
+                    <img src={coverImage} className="w-full h-full object-cover blur-xl opacity-50" />
+                    <img src={coverImage} className="absolute bottom-[-40px] left-8 w-24 h-36 object-cover rounded-xl shadow-2xl z-20 border-2 border-white" />
+                </>
+            ) : (
+                <div className="w-full h-full flex items-center justify-center bg-slate-100">
+                    <BookOpen size={48} className="text-slate-300" />
                 </div>
-                <p className="text-indigo-900/80 text-sm leading-relaxed font-medium">{book.analystNote || "Loading market analysis for this asset..."}</p>
+            )}
+            <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full backdrop-blur-md z-30 transition-all">
+                <X size={20} />
+            </button>
+        </div>
+
+        {/* Content */}
+        <div className="px-8 pt-12 pb-8 flex-1 overflow-y-auto">
+            <h2 className="text-2xl font-extrabold text-slate-900 leading-tight">{book.title}</h2>
+            <p className="text-lg text-slate-500 font-medium mb-6">{book.author}</p>
+
+            {/* Stats Row */}
+            <div className="flex gap-4 mb-8">
+                <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                    <div className="text-2xl font-extrabold text-slate-900">{history.length}</div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Reads</div>
+                </div>
+                <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                    <div className="text-2xl font-extrabold text-slate-900">{history.length > 0 ? new Date(history[0].timestamp).toLocaleDateString(undefined, {month:'short', day:'numeric'}) : '-'}</div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last Read</div>
+                </div>
             </div>
-          </div>
 
-          {/* REAL Reading History List */}
-          <div className="px-6 mt-8 mb-10">
-             <div className="flex items-center justify-between mb-4 px-1">
-               <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">Reading History</h3>
-             </div>
-             <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
-                {history.map((entry, index) => (
-                  <div key={entry.id} className={`flex items-center justify-between p-4 ${index !== history.length - 1 ? 'border-b border-slate-50' : ''}`}>
-                    <div className="flex items-center gap-3">
-                       <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
-                          <History size={18} />
-                       </div>
-                       <div className="flex flex-col">
-                          <span className="text-sm font-bold text-slate-900">{formatDate(entry.timestamp)}</span>
-                          <span className="text-[10px] text-slate-500 font-bold">
-                             {formatTime(entry.timestamp) ? `${formatTime(entry.timestamp)} • ` : ''}{entry.reader}
-                          </span>
-                       </div>
+            {/* Actions */}
+            <div className="space-y-3 mb-8">
+                <button onClick={() => onReadAgain(book)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
+                    <RotateCcw size={18} />
+                    Read Again
+                </button>
+                
+                <div className="flex gap-3">
+                    <button 
+                        onClick={() => onToggleStatus(book.id, isBorrowed ? 'owned' : 'borrowed')} 
+                        className={`flex-1 py-3 font-bold rounded-xl border-2 flex items-center justify-center gap-2 transition-colors ${isBorrowed ? 'border-indigo-100 bg-indigo-50 text-indigo-600' : 'border-slate-200 text-slate-500 hover:border-emerald-500 hover:text-emerald-600'}`}
+                    >
+                        {isBorrowed ? <StickyNote size={18} /> : <CheckCircle2 size={18} />}
+                        {isBorrowed ? 'Borrowed' : 'Owned'}
+                    </button>
+                    
+                    {/* Delete Entire Asset Button */}
+                    <button 
+                        onClick={handleDeleteLibraryBook} 
+                        className="flex-1 py-3 font-bold rounded-xl border-2 border-red-100 bg-red-50 text-red-500 flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"
+                    >
+                        <Trash2 size={18} />
+                        Delete Asset
+                    </button>
+                </div>
+            </div>
+
+            {/* History List */}
+            {history.length > 0 && (
+                <div>
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Reading History</h3>
+                    <div className="space-y-3">
+                        {history.map((log) => (
+                            <div key={log.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                                        <Clock size={14} />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-900">{new Date(log.timestamp).toLocaleDateString()}</p>
+                                        <p className="text-[10px] font-bold text-slate-400">{new Date(log.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => onRemove(log.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors">
+                                    <X size={16} />
+                                </button>
+                            </div>
+                        ))}
                     </div>
-                  </div>
-                ))}
-                {history.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">No history found.</div>}
-             </div>
-          </div>
+                </div>
+            )}
         </div>
-
-        {/* Floating Action Bar */}
-        <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-white via-white to-transparent pt-12">
-           <button onClick={() => onReadAgain(book)} className="w-full bg-slate-900 text-white font-bold h-14 rounded-full shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
-              <BookOpen size={20} strokeWidth={2.5} />
-              Read Again
-           </button>
-        </div>
-
       </div>
     </div>
   );
