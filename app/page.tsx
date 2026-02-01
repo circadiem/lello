@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-    ScanBarcode, Search, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
+    ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
     BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
     ShieldCheck, ArrowRight 
@@ -13,16 +13,13 @@ import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
 import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
 import AvatarModal from '@/components/AvatarModal';
-import OnboardingWizard from '@/components/OnboardingWizard'; // <--- NEW IMPORT
-import { generateAnalystNote } from '@/app/actions'; 
+import OnboardingWizard from '@/components/OnboardingWizard'; 
 import { supabase } from '@/lib/supabaseClient';
 
-// --- 1. STRICT TYPE DEFINITIONS (Global Scope) ---
-
+// --- TYPES ---
 type Tab = 'library' | 'home' | 'history';
 type LibraryFilter = 'owned' | 'borrowed' | 'all';
 
-// Matches your Supabase 'library' table
 interface Book {
   id: string;
   user_id: string;
@@ -33,7 +30,6 @@ interface Book {
   created_at?: string;
 }
 
-// Matches your Supabase 'reading_logs' table
 interface ReadingLog {
   id: string;
   user_id: string;
@@ -44,18 +40,16 @@ interface ReadingLog {
   count?: number; 
 }
 
-// A unified type for the UI (Modals/Lists) to prevent "Missing Property" errors
 interface DisplayItem {
   id: string | number;
   title: string;
   author: string;
   cover?: string;
-  cover_url?: string | null; // handle both naming conventions
+  cover_url?: string | null;
   reader?: string;
   timestamp?: string;
   count?: number;
   rating?: number;
-  analystNote?: string;
   ownershipStatus?: 'owned' | 'borrowed';
   ownership_status?: 'owned' | 'borrowed';
   dailyCount?: number;
@@ -84,8 +78,8 @@ const getLastName = (fullName: string) => {
     return parts.length > 0 ? parts[parts.length - 1] : fullName;
 };
 
-// --- NEW: AVATAR HELPER ---
 const getAvatarUrl = (name: string, map: Record<string, string>) => {
+    if (!name) return ''; // FIX: Return empty if loading to prevent flash
     if (map[name]) return `/avatars/${map[name]}`;
     return `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`;
 };
@@ -93,7 +87,6 @@ const getAvatarUrl = (name: string, map: Record<string, string>) => {
 // --- COMPONENTS ---
 const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: boolean }[] }) => {
     const max = Math.max(...data.map(d => d.count), 1); 
-    
     return (
         <div className="w-full h-48 bg-slate-900 rounded-[2.5rem] p-6 flex flex-col justify-between shadow-xl mb-8">
             <div className="flex justify-between items-start mb-4">
@@ -111,9 +104,7 @@ const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: b
                         <div className="w-full relative group flex items-end justify-center h-24">
                             <div 
                                 style={{ height: `${(item.count / max) * 100}%` }} 
-                                className={`w-full max-w-[12px] rounded-full transition-all duration-500 min-h-[4px] ${
-                                    item.isToday ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]' : 'bg-slate-700 group-hover:bg-slate-600'
-                                }`}
+                                className={`w-full max-w-[12px] rounded-full transition-all duration-500 min-h-[4px] ${item.isToday ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]' : 'bg-slate-700 group-hover:bg-slate-600'}`} 
                             />
                             {item.count > 0 && (
                                 <div className="absolute -top-8 bg-white text-slate-900 text-[10px] font-bold px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
@@ -134,7 +125,7 @@ const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: b
 const LandingPage = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [isSignUp, setIsSignUp] = useState(false); // Toggle between Login/Signup
+    const [isSignUp, setIsSignUp] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -142,20 +133,11 @@ const LandingPage = () => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-
         if (isSignUp) {
-            // Sign Up Logic
-            const { error } = await supabase.auth.signUp({
-                email,
-                password,
-            });
+            const { error } = await supabase.auth.signUp({ email, password });
             if (error) setError(error.message);
         } else {
-            // Log In Logic
-            const { error } = await supabase.auth.signInWithPassword({
-                email,
-                password,
-            });
+            const { error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) setError(error.message);
         }
         setLoading(false);
@@ -186,59 +168,22 @@ const LandingPage = () => {
                 <p className="text-lg text-slate-500 font-medium mb-10 max-w-xl leading-relaxed">
                     Treat reading like the investment it is. Track volume, analyze trends, and build a compounding library of knowledge.
                 </p>
-
-                {/* Auth Form */}
                 <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100">
                     <div className="flex gap-4 mb-6 p-1 bg-slate-50 rounded-xl">
-                        <button 
-                            onClick={() => setIsSignUp(false)} 
-                            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                            Log In
-                        </button>
-                        <button 
-                            onClick={() => setIsSignUp(true)} 
-                            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
-                            Sign Up
-                        </button>
+                        <button onClick={() => setIsSignUp(false)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>Log In</button>
+                        <button onClick={() => setIsSignUp(true)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>Sign Up</button>
                     </div>
-
                     <form onSubmit={handleAuth} className="space-y-3">
                         <div className="relative">
                             <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                            <input 
-                                type="email" 
-                                placeholder="name@example.com" 
-                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all" 
-                                value={email} 
-                                onChange={(e) => setEmail(e.target.value)} 
-                                required 
-                            />
+                            <input type="email" placeholder="name@example.com" className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all" value={email} onChange={(e) => setEmail(e.target.value)} required />
                         </div>
                         <div className="relative">
                             <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                            <input 
-                                type="password" 
-                                placeholder="Password" 
-                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all" 
-                                value={password} 
-                                onChange={(e) => setPassword(e.target.value)} 
-                                required 
-                                minLength={6}
-                            />
+                            <input type="password" placeholder="Password" className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
                         </div>
-
-                        {error && (
-                            <div className="p-3 bg-red-50 text-red-600 text-xs font-bold rounded-xl flex items-center gap-2">
-                                <Activity size={14} /> {error}
-                            </div>
-                        )}
-
-                        <button 
-                            disabled={loading} 
-                            className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg shadow-slate-900/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed mt-2"
-                        >
+                        {error && (<div className="p-3 bg-red-50 text-red-600 text-xs font-bold rounded-xl flex items-center gap-2"><Activity size={14} /> {error}</div>)}
+                        <button disabled={loading} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg shadow-slate-900/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed mt-2">
                             {loading ? <Loader2 className="animate-spin" /> : (isSignUp ? 'Create Account' : 'Welcome Back')} 
                             {!loading && <ArrowRight size={18} />}
                         </button>
@@ -253,16 +198,16 @@ const LandingPage = () => {
 export default function Home() {
   const [session, setSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(true);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false); // <--- NEW STATE
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
   
   // App State
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [showReaderMenu, setShowReaderMenu] = useState(false);
-  const [activeReader, setActiveReader] = useState('Leo');
-  const [readers, setReaders] = useState(['Leo', 'Maya', 'Parents']);
-  const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({ 'Leo': { daily: 3, weekly: 15 } });
   
-  // NEW: State for Avatars
+  // FIX 1: activeReader starts empty to prevent flash of wrong avatar
+  const [activeReader, setActiveReader] = useState(''); 
+  const [readers, setReaders] = useState(['Leo', 'Maya', 'Parents']);
+  const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({});
   const [readerAvatars, setReaderAvatars] = useState<Record<string, string>>({});
 
   // Data State
@@ -277,8 +222,6 @@ export default function Home() {
   const [isPinModalOpen, setPinModalOpen] = useState(false);
   const [isChildModalOpen, setChildModalOpen] = useState(false);
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
-  
-  // NEW: Avatar Modal State
   const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
 
@@ -294,29 +237,25 @@ export default function Home() {
       setSession(session);
       if (session) fetchData(session.user.id);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
   // --- DB FETCH ---
   const fetchData = async (userId: string) => {
-      // 1. Check if profile exists (Updated Logic)
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
       
       if (!profile) {
-          // If no profile found, trigger onboarding
           setNeedsOnboarding(true);
-          // Initialize empty defaults to avoid crashes in background
           setReaders([]);
       } else {
-          // If profile exists, load normal app data
-          setReaders(profile.readers || ['Leo']);
+          const profileReaders = profile.readers || [];
+          setReaders(profileReaders);
           setReaderGoals(profile.goals || {});
           setReaderAvatars(profile.avatars || {}); 
           
-          // Ensure activeReader is set correctly if it was empty
-          if (!activeReader && profile.readers && profile.readers.length > 0) {
-              setActiveReader(profile.readers[0]);
+          // FIX 1: Set activeReader immediately upon data load
+          if (!activeReader && profileReaders.length > 0) {
+              setActiveReader(profileReaders[0]);
           }
       }
 
@@ -326,43 +265,29 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
-  // --- STATS ENGINE ---
   const stats = useMemo(() => {
     const readerLog = logs.filter(item => item.reader_name === activeReader);
     const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
     const dailyCount = readerLog.filter(item => isToday(item.timestamp)).length; 
     const weeklyCount = readerLog.filter(item => isThisWeek(item.timestamp)).length;
-    const uniqueBooks = new Set(readerLog.map(b => `${b.book_title}-${b.book_author}`)).size;
-    return { dailyCount, weeklyCount, uniqueBooks, readerLog, goals: currentGoals };
+    return { dailyCount, weeklyCount, readerLog, goals: currentGoals };
   }, [logs, activeReader, readerGoals]);
 
-  // --- ACTIONS ---
+  // Actions
   const handleReaderChangeRequest = (name: string) => {
       setShowReaderMenu(false);
-      // Check if last reader (Parent) to trigger pin
       const isParent = readers.length > 0 && name === readers[readers.length - 1];
-      if (isParent || name === 'Parents') { 
-          setPendingReaderChange(name); 
-          setPinModalOpen(true); 
-      } else { 
-          setActiveReader(name); 
-      }
+      if (isParent || name === 'Parents') { setPendingReaderChange(name); setPinModalOpen(true); } 
+      else { setActiveReader(name); }
   };
-  const onPinSuccess = () => {
-      setPinModalOpen(false);
-      if (pendingReaderChange) { setActiveReader(pendingReaderChange); setPendingReaderChange(null); }
-  };
+  const onPinSuccess = () => { setPinModalOpen(false); if (pendingReaderChange) { setActiveReader(pendingReaderChange); setPendingReaderChange(null); }};
   const handleAddChildClick = () => setChildModalOpen(true);
   
-  // NEW: Handle Save Child with Avatar support
   const handleSaveChild = async (name: string, avatar: string | null) => {
       if (!readers.includes(name)) {
-          // Maintain parents at end of list logic
-          // Find 'Parents' or the last item to keep it at the end
           const parentName = readers.length > 0 ? readers[readers.length - 1] : 'Parents';
           const kids = readers.slice(0, -1);
           const newReaders = [...kids, name, parentName];
-
           const newGoals = { ...readerGoals, [name]: { daily: 2, weekly: 10 } };
           const newAvatars = { ...readerAvatars };
           if (avatar) newAvatars[name] = avatar;
@@ -374,151 +299,54 @@ export default function Home() {
       }
   };
 
-  const handleDeleteChild = async (name: string) => {
-      if (confirm(`Remove ${name}?`)) {
-          const newReaders = readers.filter(r => r !== name);
-          await supabase.from('profiles').update({ readers: newReaders }).eq('id', session.user.id);
-          setReaders(newReaders);
-      }
-  };
-  const handleResetApp = async () => { 
-      if (confirm("WARNING: Delete all data? This cannot be undone.")) { 
-          window.location.reload(); 
-      } 
-  };
-  const handleUpdateChildGoal = async (child: string, type: 'daily' | 'weekly', value: number) => {
-      const newGoals = { ...readerGoals, [child]: { ...(readerGoals[child] || readerGoals['default']), [type]: value } };
-      setReaderGoals(newGoals); 
-      await supabase.from('profiles').update({ goals: newGoals }).eq('id', session.user.id);
-  };
+  const handleDeleteChild = async (name: string) => { if (confirm(`Remove ${name}?`)) { const newReaders = readers.filter(r => r !== name); await supabase.from('profiles').update({ readers: newReaders }).eq('id', session.user.id); setReaders(newReaders); }};
+  const handleResetApp = async () => { if (confirm("WARNING: Delete all data? This cannot be undone.")) { window.location.reload(); } };
+  const handleUpdateChildGoal = async (child: string, type: 'daily' | 'weekly', value: number) => { const newGoals = { ...readerGoals, [child]: { ...(readerGoals[child] || readerGoals['default']), [type]: value } }; setReaderGoals(newGoals); await supabase.from('profiles').update({ goals: newGoals }).eq('id', session.user.id); };
   const handleGoalSave = (newGoal: number) => handleUpdateChildGoal(activeReader, editingGoalType, newGoal);
   const handleLogout = async () => { await supabase.auth.signOut(); };
-
-  // NEW: Avatar Modal Handlers
-  const handleOpenAvatarModal = (name: string) => {
-      setEditingAvatarFor(name);
-      setAvatarModalOpen(true);
-  };
-
-  const handleSaveAvatar = async (newAvatar: string) => {
-      if (!editingAvatarFor) return;
-      const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar };
-      setReaderAvatars(newAvatars);
-      await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id);
-  };
-
+  const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
+  const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[]) => {
-    setAddModalOpen(false);
-    if (!session) return;
+    setAddModalOpen(false); if (!session) return;
     const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
     const timestamp = new Date().toISOString();
-    
     const existingBook = library.find(b => b.title === book.title && b.author === book.author);
-    if (!existingBook) {
-        const { data: newBook } = await supabase.from('library').insert({
-            user_id: session.user.id,
-            title: book.title,
-            author: book.author,
-            cover_url: book.coverUrl,
-            ownership_status: 'owned'
-        }).select().single();
-        if (newBook) setLibrary(prev => [...prev, newBook as Book]);
-    }
-    
-    const newLogs = readersToAdd.map(reader => ({
-        user_id: session.user.id,
-        book_title: book.title,
-        book_author: book.author,
-        reader_name: reader,
-        timestamp: timestamp
-    }));
-    
+    if (!existingBook) { const { data: newBook } = await supabase.from('library').insert({ user_id: session.user.id, title: book.title, author: book.author, cover_url: book.coverUrl, ownership_status: 'owned' }).select().single(); if (newBook) setLibrary(prev => [...prev, newBook as Book]); }
+    const newLogs = readersToAdd.map(reader => ({ user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: reader, timestamp: timestamp }));
     const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
-    if (insertedLogs) {
-        const castLogs = insertedLogs as ReadingLog[];
-        setLogs(prev => [...castLogs, ...prev]);
-        // Strict typing for the selected book modal
-        const displayLog: DisplayItem = { 
-            id: castLogs[0].id, 
-            title: book.title, 
-            author: book.author, 
-            cover: book.coverUrl || undefined, 
-            reader: castLogs[0].reader_name,
-            timestamp: castLogs[0].timestamp
-        };
-        setSelectedBook(displayLog);
-    }
+    if (insertedLogs) { const castLogs = insertedLogs as ReadingLog[]; setLogs(prev => [...castLogs, ...prev]); setSelectedBook({ id: castLogs[0].id, title: book.title, author: book.author, cover: book.coverUrl || undefined, reader: castLogs[0].reader_name, timestamp: castLogs[0].timestamp }); }
   };
 
-  const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => {
-    e.stopPropagation(); 
-    if (!session) return;
-    const newLog = { 
-        user_id: session.user.id, 
-        book_title: book.title, 
-        book_author: book.author, 
-        reader_name: activeReader, 
-        timestamp: new Date().toISOString() 
-    };
-    const { data } = await supabase.from('reading_logs').insert(newLog).select().single();
-    if (data) setLogs(prev => [data as ReadingLog, ...prev]);
-  };
-
-  const handleReadAgain = async (book: any) => {
-    if (!session) return;
-    // Handle both Book and DisplayItem shapes
-    const title = book.title || book.book_title;
-    const author = book.author || book.book_author;
-    
-    const newLog = { user_id: session.user.id, book_title: title, book_author: author, reader_name: activeReader, timestamp: new Date().toISOString() };
-    const { data } = await supabase.from('reading_logs').insert(newLog).select().single();
-    if (data) {
-        setLogs(prev => [data as ReadingLog, ...prev]);
-        setSelectedBook((prev) => prev ? ({ ...prev, count: (prev.count || 0) + 1 }) : null);
-    }
-  };
-
-  const handleRemoveBook = async (id: number | string) => {
-      await supabase.from('reading_logs').delete().eq('id', id);
-      setLogs(prev => prev.filter(i => i.id !== id));
+  const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => { e.stopPropagation(); if (!session) return; const newLog = { user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) setLogs(prev => [data as ReadingLog, ...prev]); };
+  const handleReadAgain = async (book: any) => { if (!session) return; const title = book.title || book.book_title; const author = book.author || book.book_author; const newLog = { user_id: session.user.id, book_title: title, book_author: author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) { setLogs(prev => [data as ReadingLog, ...prev]); setSelectedBook((prev) => prev ? ({ ...prev, count: (prev.count || 0) + 1 }) : null); }};
+  const handleRemoveBook = async (id: number | string) => { await supabase.from('reading_logs').delete().eq('id', id); setLogs(prev => prev.filter(i => i.id !== id)); setSelectedBook(null); };
+  
+  // FIX 2: Delete Asset Function (Passed to Modal)
+  const handleDeleteAsset = async (title: string) => {
+      if (!session) return;
+      await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id);
+      setLibrary(prev => prev.filter(b => b.title !== title));
       setSelectedBook(null);
   };
 
-  const handleToggleStatus = async (id: number | string, newStatus: 'owned' | 'borrowed') => {
-      if (!selectedBook) return;
-      const libBook = library.find(b => b.title === selectedBook.title);
-      if (libBook) {
-          await supabase.from('library').update({ ownership_status: newStatus }).eq('id', libBook.id);
-          setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, ownership_status: newStatus } : b));
-          setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null);
-      }
-  };
+  const handleToggleStatus = async (id: number | string, newStatus: 'owned' | 'borrowed') => { if (!selectedBook) return; const libBook = library.find(b => b.title === selectedBook.title); if (libBook) { await supabase.from('library').update({ ownership_status: newStatus }).eq('id', libBook.id); setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, ownership_status: newStatus } : b)); setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null); }};
 
-  // Convert logs to display items for the modal history
-  const selectedBookHistory = useMemo(() => {
-      if (!selectedBook) return [];
-      return logs
-        .filter(l => l.book_title === selectedBook.title)
-        .map(l => ({ 
-            id: l.id,
-            title: l.book_title, 
-            author: l.book_author, // FIX: Ensure author is passed
-            reader: l.reader_name, 
-            timestamp: l.timestamp 
-        } as any)) // Casting to any for modal compatibility to satisfy strict checks
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [selectedBook, logs]);
-
+  const selectedBookHistory = useMemo(() => { if (!selectedBook) return []; return logs.filter(l => l.book_title === selectedBook.title).map(l => ({ id: l.id, title: l.book_title, author: l.book_author, reader: l.reader_name, timestamp: l.timestamp } as any)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); }, [selectedBook, logs]);
   const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
-  // --- VIEWS ---
+  // --- EXPANDED VIEW COMPONENTS ---
 
   const ParentDashboard = () => (
       <div className="animate-in fade-in zoom-in-95 duration-300 pb-20">
           <div className="flex items-center gap-4 py-6 mb-4">
-             <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white"><Settings size={24} /></div>
-             <div><h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Parent's Corner</h1><p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Admin Dashboard</p></div>
+             <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white">
+                 <Settings size={24} />
+             </div>
+             <div>
+                 <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Parent's Corner</h1>
+                 <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Admin Dashboard</p>
+             </div>
           </div>
           <div className="space-y-6">
               <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
@@ -528,36 +356,76 @@ export default function Home() {
                           <div key={kid} className="p-4 bg-slate-50 rounded-3xl border border-slate-100">
                               <div className="flex items-center justify-between mb-4">
                                   <div className="flex items-center gap-3">
-                                      {/* NEW: Clickable Avatar to Edit */}
+                                      {/* Clickable Avatar to Edit */}
                                       <button onClick={() => handleOpenAvatarModal(kid)} className="relative group">
                                           <img src={getAvatarUrl(kid, readerAvatars)} className="w-10 h-10 rounded-full bg-white shadow-sm object-cover" />
-                                          <div className="absolute inset-0 bg-black/20 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Edit3 size={12} className="text-white" /></div>
+                                          <div className="absolute inset-0 bg-black/20 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <Edit3 size={12} className="text-white" />
+                                          </div>
                                       </button>
                                       <span className="font-bold text-slate-900 text-lg">{kid}</span>
                                   </div>
-                                  {/* Don't allow deleting the parent/last user easily here without logic checks */}
                                   {readers.length > 0 && kid !== readers[readers.length - 1] && 
-                                    <button onClick={() => handleDeleteChild(kid)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><Trash2 size={18} /></button>
+                                    <button onClick={() => handleDeleteChild(kid)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all">
+                                        <Trash2 size={18} />
+                                    </button>
                                   }
                               </div>
                               
                               {readers.length > 0 && kid !== readers[readers.length - 1] && (
                               <div className="space-y-3 pl-14">
-                                  <div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>DAILY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).daily} books</span></div><input type="range" min="1" max="10" value={(readerGoals[kid] || readerGoals['default']).daily} onChange={(e) => handleUpdateChildGoal(kid, 'daily', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div>
-                                  <div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>WEEKLY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).weekly} books</span></div><input type="range" min="5" max="50" step="5" value={(readerGoals[kid] || readerGoals['default']).weekly} onChange={(e) => handleUpdateChildGoal(kid, 'weekly', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div>
+                                  <div>
+                                      <div className="flex justify-between text-xs font-bold text-slate-400 mb-1">
+                                          <span>DAILY GOAL</span>
+                                          <span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).daily} books</span>
+                                      </div>
+                                      <input 
+                                          type="range" 
+                                          min="1" 
+                                          max="10" 
+                                          value={(readerGoals[kid] || readerGoals['default']).daily} 
+                                          onChange={(e) => handleUpdateChildGoal(kid, 'daily', parseInt(e.target.value))} 
+                                          className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" 
+                                      />
+                                  </div>
+                                  <div>
+                                      <div className="flex justify-between text-xs font-bold text-slate-400 mb-1">
+                                          <span>WEEKLY GOAL</span>
+                                          <span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).weekly} books</span>
+                                      </div>
+                                      <input 
+                                          type="range" 
+                                          min="5" 
+                                          max="50" 
+                                          step="1" // Fix 3b: Single step increments
+                                          value={(readerGoals[kid] || readerGoals['default']).weekly} 
+                                          onChange={(e) => handleUpdateChildGoal(kid, 'weekly', parseInt(e.target.value))} 
+                                          className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" 
+                                      />
+                                  </div>
                               </div>
                               )}
                           </div>
                       ))}
-                      <button onClick={handleAddChildClick} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:border-slate-400 hover:text-slate-600 transition-all active:scale-95"><UserPlus size={18} /><span>Add Child</span></button>
+                      <button onClick={handleAddChildClick} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:border-slate-400 hover:text-slate-600 transition-all active:scale-95">
+                          <UserPlus size={18} />
+                          <span>Add Child</span>
+                      </button>
                   </div>
               </section>
               <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
                   <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">System</h3>
-                  <button onClick={handleResetApp} className="w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl text-sm hover:bg-red-100 transition-colors">Factory Reset App</button>
-                  <button onClick={handleLogout} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors mt-2">Log Out</button>
+                  <button onClick={handleResetApp} className="w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl text-sm hover:bg-red-100 transition-colors">
+                      Factory Reset App
+                  </button>
+                  <button onClick={handleLogout} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors mt-2">
+                      Log Out
+                  </button>
               </section>
-              <button onClick={() => setActiveReader(readers[0] || 'Leo')} className="w-full py-4 bg-slate-900 text-white font-bold rounded-[2rem] shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform"><LogOut size={18} /><span>Exit Parent Mode</span></button>
+              <button onClick={() => setActiveReader(readers[0] || 'Leo')} className="w-full py-4 bg-slate-900 text-white font-bold rounded-[2rem] shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                  <LogOut size={18} />
+                  <span>Exit Parent Mode</span>
+              </button>
           </div>
       </div>
   );
@@ -565,9 +433,13 @@ export default function Home() {
   const HomeView = () => (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
       <section className="flex flex-col items-center justify-center py-12">
-        <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Weekly Reads</h2>
-        <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.weeklyCount}</div>
-        {stats.weeklyCount >= stats.goals.weekly && (<div className="mt-4 px-4 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-widest animate-bounce">Weekly Target Met!</div>)}
+          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Weekly Reads</h2>
+          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.weeklyCount}</div>
+          {stats.weeklyCount >= stats.goals.weekly && (
+              <div className="mt-4 px-4 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-widest animate-bounce">
+                  Weekly Target Met!
+              </div>
+          )}
       </section>
       <section className="space-y-8">
         <div>
@@ -603,7 +475,6 @@ export default function Home() {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<LibraryFilter>('owned');
     
-    // Explicitly Type filteredBooks
     const filteredBooks: Book[] = library.filter(book => {
         const safeTitle = (book.title || '').toLowerCase();
         const safeAuthor = (book.author || '').toLowerCase();
@@ -615,7 +486,6 @@ export default function Home() {
         return matchesSearch;
     }).sort((a, b) => (getLastName(a.author || '').localeCompare(getLastName(b.author || ''))));
     
-    // Explicitly tell TypeScript that we are building a dictionary of Book Arrays
     const groupedBooks = filteredBooks.reduce((groups, book) => {
         const lastName = getLastName(book.author || 'Unknown');
         const letter = lastName.charAt(0).toUpperCase();
@@ -643,7 +513,6 @@ export default function Home() {
                             {groupedBooks[letter].map((book: Book) => (
                                 <button 
                                     key={book.id} 
-                                    // Cast to DisplayItem to satisfy strict modal types
                                     onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status })} 
                                     className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform"
                                 >
@@ -675,37 +544,8 @@ export default function Home() {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
-            const count = logs.filter(item => {
-                const itemDate = new Date(item.timestamp);
-                return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth();
-            }).length;
-            days.push({ day: dayName, count, isToday: i === 0 });
-        }
-        return days;
-    }, [logs, activeReader]);
-
-    const groupedHistory = useMemo(() => {
-        const groups: Record<string, any> = {};
-        const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        sortedLog.forEach(item => {
-            const dateKey = new Date(item.timestamp).toLocaleDateString();
-            const key = `${dateKey}-${item.book_title}`;
-            if (!groups[key]) { 
-                groups[key] = { 
-                    id: item.id,
-                    title: item.book_title,
-                    author: item.book_author, // Ensured existence
-                    cover: getBookCover(item.book_title),
-                    dailyCount: 0,
-                    timestamp: item.timestamp,
-                    reader: item.reader_name
-                }; 
-            }
-            groups[key].dailyCount += 1;
-        });
-        return Object.values(groups);
-    }, [stats.readerLog, library]);
-
+            const count = logs.filter(item => { const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length; days.push({ day: dayName, count, isToday: i === 0 }); } return days; }, [logs, activeReader]);
+    const groupedHistory = useMemo(() => { const groups: Record<string, any> = {}; const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); sortedLog.forEach(item => { const dateKey = new Date(item.timestamp).toLocaleDateString(); const key = `${dateKey}-${item.book_title}`; if (!groups[key]) { groups[key] = { id: item.id, title: item.book_title, author: item.book_author, cover: getBookCover(item.book_title), dailyCount: 0, timestamp: item.timestamp, reader: item.reader_name }; } groups[key].dailyCount += 1; }); return Object.values(groups); }, [stats.readerLog, library]);
     const isDailyGoalMet = stats.dailyCount >= stats.goals.daily;
     const isWeeklyGoalMet = stats.weeklyCount >= stats.goals.weekly;
 
@@ -714,39 +554,31 @@ export default function Home() {
             <h1 className="text-4xl font-extrabold tracking-tight pt-4 mb-6">Activity</h1>
             <ReadingChart data={chartData} />
             <div className="space-y-4 mb-8">
-                <button onClick={() => setGoalModalOpen(true)} className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isDailyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}>
+                {/* Daily Goal Button */}
+                <button 
+                    onClick={() => { setEditingGoalType('daily'); setGoalModalOpen(true); }} 
+                    className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isDailyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}
+                >
                     <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isDailyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Daily Goal</p><p className="text-xl font-bold">{isDailyGoalMet ? 'Goal Achieved! ✨' : `${stats.goals.daily - stats.dailyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-lg ${isDailyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.dailyCount}/{stats.goals.daily}</p></div>
                     <div className={`mt-4 h-2 rounded-full overflow-hidden ${isDailyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isDailyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.dailyCount / stats.goals.daily) * 100, 100)}%` }} /></div>
                 </button>
-                <button className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isWeeklyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}>
+                
+                {/* Fix 3a: Wired up Weekly Goal Button */}
+                <button 
+                    onClick={() => { setEditingGoalType('weekly'); setGoalModalOpen(true); }} 
+                    className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isWeeklyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}
+                >
                     <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isWeeklyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Weekly Goal</p><p className="text-xl font-bold">{isWeeklyGoalMet ? 'Weekly Target Met! 🏆' : `${stats.goals.weekly - stats.weeklyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-slate-400 ${isWeeklyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.weeklyCount}/{stats.goals.weekly}</p></div>
                     <div className={`mt-4 h-2 rounded-full overflow-hidden ${isWeeklyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isWeeklyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.weeklyCount / stats.goals.weekly) * 100, 100)}%` }} /></div>
                 </button>
             </div>
             <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4 pl-2">Recent Reads</h3>
-            <div className="space-y-3">
-                {groupedHistory.map((item: any) => (
-                    <div key={item.id} className="w-full bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
-                        <button onClick={() => setSelectedBook(item)} className="flex items-center gap-4 flex-1 text-left">
-                            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden">
-                                {item.cover ? <img src={item.cover} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
-                            </div>
-                            <div className="flex-1 min-w-0 pr-2"><p className="font-bold text-slate-900 line-clamp-1">{item.title}</p><p className="text-xs text-slate-500 font-bold">{new Date(item.timestamp).toLocaleDateString()}</p></div>
-                        </button>
-                        <div className="flex items-center gap-3">
-                            {item.dailyCount > 1 && (<span className="font-mono-tabular font-bold text-slate-400 text-sm">{item.dailyCount}x</span>)}
-                            <button onClick={(e) => handleQuickAdd(e, item)} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-90"><Plus size={18} strokeWidth={3} /></button>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
+            <div className="space-y-3">{groupedHistory.map((item: any) => (<div key={item.id} className="w-full bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm"><button onClick={() => setSelectedBook(item)} className="flex items-center gap-4 flex-1 text-left"><div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden">{item.cover ? <img src={item.cover} className="w-full h-full object-cover" /> : <BookOpen size={20} />}</div><div className="flex-1 min-w-0 pr-2"><p className="font-bold text-slate-900 line-clamp-1">{item.title}</p><p className="text-xs text-slate-500 font-bold">{new Date(item.timestamp).toLocaleDateString()}</p></div></button><div className="flex items-center gap-3">{item.dailyCount > 1 && (<span className="font-mono-tabular font-bold text-slate-400 text-sm">{item.dailyCount}x</span>)}<button onClick={(e) => handleQuickAdd(e, item)} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-90"><Plus size={18} strokeWidth={3} /></button></div></div>))}</div></div>
     );
   };
 
   if (loadingSession) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={32} /></div>;
   if (!session) return <LandingPage />;
-  // NEW: Check for onboarding state
   if (needsOnboarding) return <OnboardingWizard userId={session.user.id} onComplete={() => { setNeedsOnboarding(false); fetchData(session.user.id); }} />;
 
   return (
@@ -778,39 +610,21 @@ export default function Home() {
         </div>
       </header>
       <main className="mt-20 px-6 max-w-lg mx-auto w-full">
-        {/* Logic: if activeReader is last in list (Parent), show Parent Dashboard. Else show views */}
         {readers.length > 0 && activeReader === readers[readers.length-1] ? <ParentDashboard /> : (activeTab === 'library' ? <LibraryView /> : activeTab === 'home' ? <HomeView /> : <HistoryView />)}
       </main>
-      
-      {/* Bottom Nav: Only show if NOT Parent */}
-      {readers.length > 0 && activeReader !== readers[readers.length-1] && (
-      <nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
-        <button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button>
-        <button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button>
-        <button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button>
-      </nav>
-      )}
-
-      {/* Add Button: Only show if NOT Parent */}
+      {readers.length > 0 && activeReader !== readers[readers.length-1] && (<nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]"><button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button></nav>)}
       {readers.length > 0 && activeReader !== readers[readers.length-1] && (<div className="fixed bottom-24 left-0 right-0 flex justify-center z-40 pointer-events-none"><button onClick={() => setAddModalOpen(true)} className="pointer-events-auto bg-slate-900 text-slate-50 px-10 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"><Plus size={20} strokeWidth={3} /><span>Add</span></button></div>)}
     </div>
     
     <AddBookModal isOpen={isAddModalOpen} onClose={() => setAddModalOpen(false)} onAdd={handleAddBook} readers={readers.slice(0, -1)} activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader} />
-    <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onToggleStatus={handleToggleStatus} />
+    
+    {/* FIX 2: Passed handleDeleteAsset to Modal */}
+    <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onDeleteAsset={handleDeleteAsset} onToggleStatus={handleToggleStatus} />
+    
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
-    
-    {/* NEW: Passed correct handler with signature (name, avatar) */}
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
-    
-    {/* NEW: Avatar Modal */}
-    <AvatarModal 
-        isOpen={isAvatarModalOpen} 
-        onClose={() => setAvatarModalOpen(false)} 
-        onSave={handleSaveAvatar} 
-        currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null}
-        name={editingAvatarFor || ''} 
-    />
+    <AvatarModal isOpen={isAvatarModalOpen} onClose={() => setAvatarModalOpen(false)} onSave={handleSaveAvatar} currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null} name={editingAvatarFor || ''} />
     </>
   );
 };
