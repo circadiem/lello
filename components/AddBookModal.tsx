@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus } from 'lucide-react';
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift } from 'lucide-react';
 
 export interface GoogleBook {
   title: string;
@@ -14,7 +14,8 @@ export interface GoogleBook {
 interface AddBookModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (book: GoogleBook, readers: string[]) => void;
+  // UPDATED: Now accepts 'status' so page.tsx knows where to file it
+  onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'wishlist') => void;
   readers: string[];
   activeReader: string;
 }
@@ -34,9 +35,14 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         setResults([]);
         setError(null);
         setSelectedBook(null);
-        setSelectedReaders([activeReader]);
+        // Default to active reader if valid, otherwise first available
+        if (activeReader && activeReader !== 'Parents') {
+            setSelectedReaders([activeReader]);
+        } else if (readers.length > 0) {
+            setSelectedReaders([readers[0]]);
+        }
     }
-  }, [isOpen, activeReader]);
+  }, [isOpen, activeReader, readers]);
 
   const searchBooks = async () => {
     if (!query) return;
@@ -65,7 +71,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         const formatted = data.items.map((item: any) => ({
           title: item.volumeInfo.title,
           author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
-          coverUrl: item.volumeInfo.imageLinks?.thumbnail || null,
+          coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
           description: item.volumeInfo.description || '',
           pageCount: item.volumeInfo.pageCount || 0
         }));
@@ -174,14 +180,27 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
         {/* Footer */}
         <div className="p-6 bg-white border-t border-slate-100">
-          <button 
-            disabled={!selectedBook}
-            onClick={() => selectedBook && onAdd(selectedBook, selectedReaders)}
-            className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
-          >
-             <Plus size={20} strokeWidth={3} />
-             Add to Library
-          </button>
+          <div className="flex gap-3">
+            {/* Button 1: Add to Library */}
+            <button 
+                disabled={!selectedBook}
+                onClick={() => selectedBook && onAdd(selectedBook, selectedReaders, 'owned')}
+                className="flex-1 py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+            >
+                <Plus size={20} strokeWidth={3} />
+                Library
+            </button>
+
+            {/* Button 2: Add to Registry */}
+            <button 
+                disabled={!selectedBook}
+                onClick={() => selectedBook && onAdd(selectedBook, [], 'wishlist')} // Pass empty readers for registry
+                className="flex-1 py-4 bg-indigo-50 text-indigo-600 border-2 border-indigo-100 font-bold rounded-2xl hover:bg-indigo-100 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+            >
+                <Gift size={20} strokeWidth={2.5} />
+                Registry
+            </button>
+          </div>
         </div>
       </div>
     </div>

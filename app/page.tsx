@@ -5,7 +5,7 @@ import {
     ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
     BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
-    ShieldCheck, ArrowRight 
+    ShieldCheck, ArrowRight, Gift 
   } from 'lucide-react';  
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
@@ -18,7 +18,8 @@ import { supabase } from '@/lib/supabaseClient';
 
 // --- TYPES ---
 type Tab = 'library' | 'home' | 'history';
-type LibraryFilter = 'owned' | 'borrowed' | 'all';
+// UPDATED: Added 'wishlist' to filter types
+type LibraryFilter = 'owned' | 'borrowed' | 'wishlist' | 'all';
 
 interface Book {
   id: string;
@@ -26,7 +27,7 @@ interface Book {
   title: string;
   author: string;
   cover_url: string | null;
-  ownership_status: 'owned' | 'borrowed';
+  ownership_status: 'owned' | 'borrowed' | 'wishlist'; // UPDATED
   created_at?: string;
 }
 
@@ -51,7 +52,7 @@ interface DisplayItem {
   count?: number;
   rating?: number;
   ownershipStatus?: 'owned' | 'borrowed';
-  ownership_status?: 'owned' | 'borrowed';
+  ownership_status?: 'owned' | 'borrowed' | 'wishlist';
   dailyCount?: number;
 }
 
@@ -79,7 +80,7 @@ const getLastName = (fullName: string) => {
 };
 
 const getAvatarUrl = (name: string, map: Record<string, string>) => {
-    if (!name) return ''; // FIX: Return empty if loading to prevent flash
+    if (!name) return ''; 
     if (map[name]) return `/avatars/${map[name]}`;
     return `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`;
 };
@@ -147,7 +148,6 @@ const LandingPage = () => {
         <div className="min-h-screen bg-slate-50 flex flex-col">
             <nav className="flex justify-between items-center px-8 py-6 max-w-7xl mx-auto w-full">
                 <div className="flex items-center gap-3">
-                    {/* App Icon */}
                     <img 
                         src="/icon.png" 
                         alt="Lello Logo" 
@@ -165,13 +165,11 @@ const LandingPage = () => {
                     Beta Access Open
                 </div>
                 
-                {/* NEW HEADLINE */}
                 <h1 className="text-5xl sm:text-7xl font-extrabold text-slate-900 tracking-tight mb-6 leading-tight">
                     Capture every chapter <br className="hidden sm:block" />
                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">of their childhood.</span>
                 </h1>
                 
-                {/* NEW SUBHEAD */}
                 <p className="text-lg text-slate-500 font-medium mb-10 max-w-xl leading-relaxed">
                     From their first picture book to their first novel. Track the journey, celebrate the milestones, and foster a love for learning.
                 </p>
@@ -202,7 +200,6 @@ const LandingPage = () => {
     );
 };
 
-
 // --- MAIN APP ---
 export default function Home() {
   const [session, setSession] = useState<any>(null);
@@ -213,7 +210,6 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [showReaderMenu, setShowReaderMenu] = useState(false);
   
-  // FIX 1: activeReader starts empty to prevent flash of wrong avatar
   const [activeReader, setActiveReader] = useState(''); 
   const [readers, setReaders] = useState(['Leo', 'Maya', 'Parents']);
   const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({});
@@ -262,7 +258,6 @@ export default function Home() {
           setReaderGoals(profile.goals || {});
           setReaderAvatars(profile.avatars || {}); 
           
-          // FIX 1: Set activeReader immediately upon data load
           if (!activeReader && profileReaders.length > 0) {
               setActiveReader(profileReaders[0]);
           }
@@ -316,15 +311,58 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
-  const handleAddBook = async (book: GoogleBook, selectedReaders: string[]) => {
-    setAddModalOpen(false); if (!session) return;
+  // UPDATED: Handle adding both 'owned' and 'wishlist' books
+  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist') => {
+    setAddModalOpen(false); 
+    if (!session) return;
+
+    // 1. Add to Library Table (Check if exists first)
+    const existingBook = library.find(b => b.title === book.title && b.author === book.author);
+    
+    if (!existingBook) { 
+        const { data: newBook } = await supabase.from('library').insert({ 
+            user_id: session.user.id, 
+            title: book.title, 
+            author: book.author, 
+            cover_url: book.coverUrl, 
+            ownership_status: status // <--- Use the passed status
+        }).select().single();
+        
+        if (newBook) setLibrary(prev => [...prev, newBook as Book]); 
+    }
+
+    // 2. If it's a Registry item, STOP HERE. Do not create reading logs.
+    if (status === 'wishlist') return;
+
+    // 3. If 'owned', Create Reading Logs (History)
     const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
     const timestamp = new Date().toISOString();
-    const existingBook = library.find(b => b.title === book.title && b.author === book.author);
-    if (!existingBook) { const { data: newBook } = await supabase.from('library').insert({ user_id: session.user.id, title: book.title, author: book.author, cover_url: book.coverUrl, ownership_status: 'owned' }).select().single(); if (newBook) setLibrary(prev => [...prev, newBook as Book]); }
-    const newLogs = readersToAdd.map(reader => ({ user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: reader, timestamp: timestamp }));
+
+    const newLogs = readersToAdd.map(reader => ({ 
+        user_id: session.user.id, 
+        book_title: book.title, 
+        book_author: book.author, 
+        reader_name: reader, 
+        timestamp: timestamp 
+    }));
+    
     const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
-    if (insertedLogs) { const castLogs = insertedLogs as ReadingLog[]; setLogs(prev => [...castLogs, ...prev]); setSelectedBook({ id: castLogs[0].id, title: book.title, author: book.author, cover: book.coverUrl || undefined, reader: castLogs[0].reader_name, timestamp: castLogs[0].timestamp }); }
+    
+    if (insertedLogs) { 
+        const castLogs = insertedLogs as ReadingLog[]; 
+        setLogs(prev => [...castLogs, ...prev]); 
+        
+        // Open the detail modal for immediate gratification
+        setSelectedBook({ 
+            id: castLogs[0].id, 
+            title: book.title, 
+            author: book.author, 
+            cover: book.coverUrl || undefined, 
+            reader: castLogs[0].reader_name, 
+            timestamp: castLogs[0].timestamp,
+            ownershipStatus: 'owned'
+        }); 
+    }
   };
 
   const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => { e.stopPropagation(); if (!session) return; const newLog = { user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) setLogs(prev => [data as ReadingLog, ...prev]); };
@@ -492,6 +530,8 @@ export default function Home() {
         
         if (filter === 'owned') return matchesSearch && (book.ownership_status === 'owned' || !book.ownership_status);
         if (filter === 'borrowed') return matchesSearch && book.ownership_status === 'borrowed';
+        // UPDATED: Handle Wishlist filter
+        if (filter === 'wishlist') return matchesSearch && book.ownership_status === 'wishlist';
         return matchesSearch;
     }).sort((a, b) => (getLastName(a.author || '').localeCompare(getLastName(b.author || ''))));
     
@@ -508,10 +548,11 @@ export default function Home() {
     return (
         <div className="animate-in fade-in slide-in-from-right-8 duration-300 pb-20">
             <h1 className="text-4xl font-extrabold tracking-tight pt-4 mb-4">Library</h1>
+            {/* UPDATED FILTERS */}
             <div className="flex bg-slate-100 p-1 rounded-2xl mb-6">
-                <button onClick={() => setFilter('owned')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'owned' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Our Library</button>
+                <button onClick={() => setFilter('owned')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'owned' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Library</button>
+                <button onClick={() => setFilter('wishlist')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'wishlist' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Registry</button>
                 <button onClick={() => setFilter('borrowed')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'borrowed' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Borrowed</button>
-                <button onClick={() => setFilter('all')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'all' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Archive</button>
             </div>
             <input type="text" placeholder="Search..." className="w-full bg-white border border-slate-200 rounded-2xl pl-4 pr-4 py-4 mb-4" value={search} onChange={(e) => setSearch(e.target.value)} />
             <div className="space-y-8">
@@ -531,7 +572,9 @@ export default function Home() {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
                                             <p className="font-bold text-slate-900 truncate">{book.title}</p>
+                                            {/* Status Badges */}
                                             {filter === 'all' && book.ownership_status === 'borrowed' && (<div className="px-1.5 py-0.5 bg-indigo-100 rounded-md"><StickyNote size={10} className="text-indigo-600" /></div>)}
+                                            {filter === 'all' && book.ownership_status === 'wishlist' && (<div className="px-1.5 py-0.5 bg-orange-100 rounded-md"><Gift size={10} className="text-orange-600" /></div>)}
                                         </div>
                                         <p className="text-xs text-slate-500 font-medium truncate">{book.author}</p>
                                     </div>
@@ -619,9 +662,20 @@ export default function Home() {
         </div>
       </header>
       <main className="mt-20 px-6 max-w-lg mx-auto w-full">
+        {/* Logic: if activeReader is last in list (Parent), show Parent Dashboard. Else show views */}
         {readers.length > 0 && activeReader === readers[readers.length-1] ? <ParentDashboard /> : (activeTab === 'library' ? <LibraryView /> : activeTab === 'home' ? <HomeView /> : <HistoryView />)}
       </main>
-      {readers.length > 0 && activeReader !== readers[readers.length-1] && (<nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]"><button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button></nav>)}
+      
+      {/* Bottom Nav: Only show if NOT Parent */}
+      {readers.length > 0 && activeReader !== readers[readers.length-1] && (
+      <nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
+        <button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button>
+        <button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button>
+        <button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button>
+      </nav>
+      )}
+
+      {/* Add Button: Only show if NOT Parent */}
       {readers.length > 0 && activeReader !== readers[readers.length-1] && (<div className="fixed bottom-24 left-0 right-0 flex justify-center z-40 pointer-events-none"><button onClick={() => setAddModalOpen(true)} className="pointer-events-auto bg-slate-900 text-slate-50 px-10 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"><Plus size={20} strokeWidth={3} /><span>Add</span></button></div>)}
     </div>
     
@@ -632,8 +686,18 @@ export default function Home() {
     
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
+    
+    {/* NEW: Passed correct handler with signature (name, avatar) */}
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
-    <AvatarModal isOpen={isAvatarModalOpen} onClose={() => setAvatarModalOpen(false)} onSave={handleSaveAvatar} currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null} name={editingAvatarFor || ''} />
+    
+    {/* NEW: Avatar Modal */}
+    <AvatarModal 
+        isOpen={isAvatarModalOpen} 
+        onClose={() => setAvatarModalOpen(false)} 
+        onSave={handleSaveAvatar} 
+        currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null}
+        name={editingAvatarFor || ''} 
+    />
     </>
   );
 };

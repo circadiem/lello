@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { X, BookOpen, Clock, Trash2, RotateCcw, CheckCircle2, StickyNote } from 'lucide-react';
+import { X, BookOpen, Clock, Trash2, RotateCcw, CheckCircle2, StickyNote, Gift, ArrowDownToLine } from 'lucide-react';
 
 // Reusing the strict types
 interface DisplayItem {
@@ -13,7 +13,7 @@ interface DisplayItem {
   reader?: string;
   timestamp?: string;
   count?: number;
-  ownershipStatus?: 'owned' | 'borrowed';
+  ownershipStatus?: 'owned' | 'borrowed' | 'wishlist'; // UPDATED TYPE
 }
 
 interface HistoryItem {
@@ -31,7 +31,7 @@ interface BookDetailModalProps {
   onReadAgain: (book: DisplayItem) => void;
   onRemove: (id: string | number) => void; 
   onDeleteAsset?: (title: string) => void; 
-  onToggleStatus: (id: string | number, status: 'owned' | 'borrowed') => void;
+  onToggleStatus: (id: string | number, status: 'owned' | 'borrowed' | 'wishlist') => void; // UPDATED TYPE
 }
 
 export default function BookDetailModal({ 
@@ -48,6 +48,7 @@ export default function BookDetailModal({
 
   const coverImage = book.cover || book.cover_url;
   const isBorrowed = book.ownershipStatus === 'borrowed';
+  const isWishlist = book.ownershipStatus === 'wishlist';
 
   const handleDeleteLibraryBook = () => {
       if (confirm(`Delete "${book.title}" from your Library entirely? This cannot be undone.`)) {
@@ -78,7 +79,7 @@ export default function BookDetailModal({
                 </div>
             )}
             
-            {/* UI: Trash Icon Top Left (As requested) */}
+            {/* Trash Icon (Top Left) - PRESERVED */}
             <button 
                 onClick={handleDeleteLibraryBook} 
                 className="absolute top-4 left-4 p-2 bg-black/20 hover:bg-red-500 text-white hover:text-white rounded-full backdrop-blur-md z-30 transition-all"
@@ -86,7 +87,7 @@ export default function BookDetailModal({
                 <Trash2 size={20} />
             </button>
 
-            {/* Close Icon Top Right */}
+            {/* Close Icon (Top Right) */}
             <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full backdrop-blur-md z-30 transition-all">
                 <X size={20} />
             </button>
@@ -97,41 +98,71 @@ export default function BookDetailModal({
             <h2 className="text-2xl font-extrabold text-slate-900 leading-tight">{book.title}</h2>
             <p className="text-lg text-slate-500 font-medium mb-6">{book.author}</p>
 
-            {/* Stats Row */}
-            <div className="flex gap-4 mb-8">
-                <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
-                    <div className="text-2xl font-extrabold text-slate-900">{history.length}</div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Reads</div>
+            {/* Stats Row (Hidden if Wishlist) */}
+            {!isWishlist && (
+                <div className="flex gap-4 mb-8">
+                    <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                        <div className="text-2xl font-extrabold text-slate-900">{history.length}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Reads</div>
+                    </div>
+                    <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                        <div className="text-2xl font-extrabold text-slate-900">{history.length > 0 ? new Date(history[0].timestamp).toLocaleDateString(undefined, {month:'short', day:'numeric'}) : '-'}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last Read</div>
+                    </div>
                 </div>
-                <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
-                    <div className="text-2xl font-extrabold text-slate-900">{history.length > 0 ? new Date(history[0].timestamp).toLocaleDateString(undefined, {month:'short', day:'numeric'}) : '-'}</div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last Read</div>
+            )}
+
+            {/* Wishlist Banner (Shown if Wishlist) */}
+            {isWishlist && (
+                <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-2xl mb-8 text-center">
+                    <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <Gift size={24} />
+                    </div>
+                    <h3 className="font-bold text-slate-900">On the Registry</h3>
+                    <p className="text-sm text-slate-500 mt-1">This book is in your queue but not yet in your library.</p>
                 </div>
-            </div>
+            )}
 
             {/* Actions */}
             <div className="space-y-3 mb-8">
-                <button onClick={() => onReadAgain(book)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
-                    <RotateCcw size={18} />
-                    Read Again
-                </button>
+                {isWishlist ? (
+                    // ACTION: Move to Library
+                    <button 
+                        onClick={() => {
+                            onToggleStatus(book.id, 'owned');
+                            onClose();
+                        }}
+                        className="w-full py-4 bg-emerald-500 text-white font-bold rounded-2xl shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2 hover:bg-emerald-600"
+                    >
+                        <ArrowDownToLine size={20} strokeWidth={3} />
+                        Mark as Purchased
+                    </button>
+                ) : (
+                    // ACTION: Read Again
+                    <button onClick={() => onReadAgain(book)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl active:scale-95 transition-transform flex items-center justify-center gap-2">
+                        <RotateCcw size={18} />
+                        Read Again
+                    </button>
+                )}
                 
-                {/* Cleaner Toggle Button */}
-                <button 
-                    onClick={() => onToggleStatus(book.id, isBorrowed ? 'owned' : 'borrowed')} 
-                    className={`w-full py-3 font-bold rounded-xl border flex items-center justify-center gap-2 transition-all active:scale-95 ${
-                        isBorrowed 
-                        ? 'bg-indigo-50 border-indigo-200 text-indigo-600' 
-                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                    }`}
-                >
-                    {isBorrowed ? <StickyNote size={18} /> : <CheckCircle2 size={18} />}
-                    <span>{isBorrowed ? 'Currently Borrowed' : 'Owned Copy'}</span>
-                </button>
+                {/* Clean Toggle Button (Hidden if Wishlist) - PRESERVED STYLE */}
+                {!isWishlist && (
+                    <button 
+                        onClick={() => onToggleStatus(book.id, isBorrowed ? 'owned' : 'borrowed')} 
+                        className={`w-full py-3 font-bold rounded-xl border flex items-center justify-center gap-2 transition-all active:scale-95 ${
+                            isBorrowed 
+                            ? 'bg-indigo-50 border-indigo-200 text-indigo-600' 
+                            : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                        }`}
+                    >
+                        {isBorrowed ? <StickyNote size={18} /> : <CheckCircle2 size={18} />}
+                        <span>{isBorrowed ? 'Currently Borrowed' : 'Owned Copy'}</span>
+                    </button>
+                )}
             </div>
 
-            {/* History List */}
-            {history.length > 0 && (
+            {/* History List (Hidden if Wishlist) */}
+            {!isWishlist && history.length > 0 && (
                 <div>
                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Reading History</h3>
                     <div className="space-y-3">
