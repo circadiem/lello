@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -21,7 +21,7 @@ interface AddBookModalProps {
   onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => void;
   readers: string[];
   activeReader: string;
-  initialQuery?: string; // NEW: Accept ISBN from scanner
+  initialQuery?: string;
 }
 
 export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeReader, initialQuery = '' }: AddBookModalProps) {
@@ -36,11 +36,9 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   const [note, setNote] = useState('');
   const [showAllResults, setShowAllResults] = useState(false);
 
-  // Initialize
   useEffect(() => {
     if (isOpen) {
-        setQuery(initialQuery); // Set initial ISBN if provided
-        // If we have an initial query (from scanner), search immediately
+        setQuery(initialQuery);
         if (initialQuery) {
             searchBooks(initialQuery);
         } else {
@@ -60,14 +58,13 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
   }, [isOpen, activeReader, readers, initialQuery]);
 
-  // NEW: Auto-Populate / Debounce Search
+  // Auto-search Debounce
   useEffect(() => {
       const delayDebounceFn = setTimeout(() => {
-        // Only auto-search if user typed enough chars and it's NOT the initial query (which is handled above)
         if (query && query.length >= 3 && query !== initialQuery) {
           searchBooks(query);
         }
-      }, 800); // 800ms wait time
+      }, 800); 
 
       return () => clearTimeout(delayDebounceFn);
   }, [query, initialQuery]);
@@ -88,25 +85,31 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
 
     try {
-      const [communityRes, googleRes] = await Promise.all([
-          supabase.rpc('search_global_books', { keyword: searchTerm }), 
-          fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`) 
-      ]);
+      // 1. SAFE COMMUNITY SEARCH (Does not break if it fails)
+      let communityBooks: GoogleBook[] = [];
+      try {
+          const { data, error } = await supabase.rpc('search_global_books', { keyword: searchTerm });
+          if (!error && data) {
+              communityBooks = data.map((b: any, i: number) => ({
+                  id: `lello-${i}`,
+                  title: b.title,
+                  author: b.author,
+                  coverUrl: b.cover_url,
+                  description: '',
+                  pageCount: 0,
+                  source: 'community',
+                  popularity: b.popularity
+              }));
+          }
+      } catch (err) {
+          console.warn("Community search skipped:", err);
+      }
 
-      const communityBooks: GoogleBook[] = (communityRes.data || []).map((b: any, i: number) => ({
-          id: `lello-${i}`,
-          title: b.title,
-          author: b.author,
-          coverUrl: b.cover_url,
-          description: '',
-          pageCount: 0,
-          source: 'community',
-          popularity: b.popularity
-      }));
-
+      // 2. GOOGLE SEARCH (Always runs)
+      const googleRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`);
       const googleData = await googleRes.json();
-      let googleBooks: GoogleBook[] = [];
       
+      let googleBooks: GoogleBook[] = [];
       if (googleData.items) {
           googleBooks = googleData.items
             .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
@@ -122,6 +125,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           }));
       }
 
+      // 3. MERGE
       const combined = [...communityBooks];
       googleBooks.forEach(gBook => {
           const isDuplicate = combined.some(cBook => 
@@ -131,34 +135,33 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           if (!isDuplicate) combined.push(gBook);
       });
 
+      // 4. SORT
       combined.sort((a, b) => {
           const queryLower = searchTerm.toLowerCase();
-          
           const aTitle = a.title.toLowerCase();
           const bTitle = b.title.toLowerCase();
           const aAuthor = a.author.toLowerCase();
           const bAuthor = b.author.toLowerCase();
 
+          // Rule 1: Community Verified
           if (a.source === 'community' && b.source !== 'community') return -1;
           if (b.source === 'community' && a.source !== 'community') return 1;
 
+          // Rule 2: Has Cover?
           if (a.coverUrl && !b.coverUrl) return -1;
           if (!a.coverUrl && b.coverUrl) return 1;
 
+          // Rule 3: Exact Matches
           const aExact = aTitle === queryLower || aAuthor === queryLower;
           const bExact = bTitle === queryLower || bAuthor === queryLower;
           if (aExact && !bExact) return -1;
           if (!aExact && bExact) return 1;
 
+          // Rule 4: Starts With
           const aStarts = aTitle.startsWith(queryLower) || aAuthor.startsWith(queryLower);
           const bStarts = bTitle.startsWith(queryLower) || bAuthor.startsWith(queryLower);
           if (aStarts && !bStarts) return -1;
           if (!aStarts && bStarts) return 1;
-
-          const aAuthorContains = aAuthor.includes(queryLower);
-          const bAuthorContains = bAuthor.includes(queryLower);
-          if (aAuthorContains && !bAuthorContains) return -1;
-          if (!aAuthorContains && bAuthorContains) return 1;
 
           return 0;
       });
@@ -205,7 +208,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            <div className="flex gap-2">
              <div className="relative flex-1">
                <input 
-                 autoFocus={!initialQuery} // Only autofocus if not coming from scanner
+                 autoFocus={!initialQuery} 
                  type="text" 
                  placeholder="Search title, author, or ISBN..." 
                  className="w-full bg-slate-100 border-0 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900 transition-all"
@@ -242,8 +245,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
         {/* Results Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 min-h-[200px]">
-           
-           {/* 1. Best Match View */}
            {!showAllResults && results.length > 0 && (
                <div className="animate-in fade-in zoom-in-95 duration-300">
                    <div className="flex items-center gap-2 mb-3 pl-2">
@@ -284,7 +285,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                </div>
            )}
 
-           {/* 2. List View (Expanded) */}
            {showAllResults && results.map((book, i) => (
              <button 
                key={i} 
@@ -310,7 +310,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            )}
         </div>
 
-        {/* Footer */}
         <div className="p-6 bg-white border-t border-slate-100 space-y-4">
           {selectedBook && (
               <div className="space-y-3 animate-in slide-in-from-bottom-2">
