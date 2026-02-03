@@ -9,7 +9,6 @@ import {
   } from 'lucide-react';  
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
-import ScannerModal from '@/components/ScannerModal'; // NEW COMPONENT
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
 import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
@@ -165,13 +164,16 @@ const LandingPage = () => {
                     </span>
                     Beta Access Open
                 </div>
+                
                 <h1 className="text-5xl sm:text-7xl font-extrabold text-slate-900 tracking-tight mb-6 leading-tight">
                     Capture every chapter <br className="hidden sm:block" />
                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">of their childhood.</span>
                 </h1>
+                
                 <p className="text-lg text-slate-500 font-medium mb-10 max-w-xl leading-relaxed">
                     From their first picture book to their first novel. Track the journey, celebrate the milestones, and foster a love for learning.
                 </p>
+
                 <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100">
                     <div className="flex gap-4 mb-6 p-1 bg-slate-50 rounded-xl">
                         <button onClick={() => setIsSignUp(false)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>Log In</button>
@@ -227,10 +229,6 @@ export default function Home() {
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
   const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
-  
-  // NEW: Scanner State
-  const [isScannerOpen, setScannerOpen] = useState(false);
-  const [scannedIsbn, setScannedIsbn] = useState('');
 
   // --- INITIALIZE ---
   useEffect(() => {
@@ -313,16 +311,8 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
-  // NEW: Scanner detected ISBN
-  const handleScanDetected = (isbn: string) => {
-      setScannerOpen(false); // Close scanner
-      setScannedIsbn(isbn); // Save ISBN
-      setAddModalOpen(true); // Open Add Modal (it will auto-search)
-  };
-
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
     setAddModalOpen(false); 
-    setScannedIsbn(''); // Reset scanner state
     if (!session) return;
 
     const existingBook = library.find(b => b.title === book.title && b.author === book.author);
@@ -397,7 +387,7 @@ export default function Home() {
             author: l.book_author, 
             reader: l.reader_name, 
             timestamp: l.timestamp,
-            notes: l.notes // PASS NOTES
+            notes: l.notes 
         } as any))
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); 
   }, [selectedBook, logs]);
@@ -577,7 +567,6 @@ export default function Home() {
         <div className="animate-in fade-in slide-in-from-right-8 duration-300 pb-20">
             <div className="flex justify-between items-center pt-4 mb-4">
                 <h1 className="text-4xl font-extrabold tracking-tight">Library</h1>
-                {/* SHARE BUTTON */}
                 {filter === 'wishlist' && (
                     <button 
                         onClick={handleShareRegistry}
@@ -612,7 +601,6 @@ export default function Home() {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
                                             <p className="font-bold text-slate-900 truncate">{book.title}</p>
-                                            {/* Status Badges */}
                                             {filter === 'all' && book.ownership_status === 'borrowed' && (<div className="px-1.5 py-0.5 bg-indigo-100 rounded-md"><StickyNote size={10} className="text-indigo-600" /></div>)}
                                             {(filter === 'all' || filter === 'wishlist') && book.ownership_status === 'wishlist' && (<div className="px-1.5 py-0.5 bg-orange-100 rounded-md"><Gift size={10} className="text-orange-600" /></div>)}
                                         </div>
@@ -629,7 +617,6 @@ export default function Home() {
     );
   };
 
-  // RESTORED: HistoryView was missing
   const HistoryView = () => {
     const chartData = useMemo(() => {
         const days = [];
@@ -639,7 +626,6 @@ export default function Home() {
             const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
             const count = logs.filter(item => { const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length; days.push({ day: dayName, count, isToday: i === 0 }); } return days; }, [logs, activeReader]);
     
-    // UPDATED: Include notes in history view
     const groupedHistory = useMemo(() => { const groups: Record<string, any> = {}; const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); sortedLog.forEach(item => { const dateKey = new Date(item.timestamp).toLocaleDateString(); const key = `${dateKey}-${item.book_title}`; if (!groups[key]) { groups[key] = { id: item.id, title: item.book_title, author: item.book_author, cover: getBookCover(item.book_title), dailyCount: 0, timestamp: item.timestamp, reader: item.reader_name, notes: item.notes }; } groups[key].dailyCount += 1; }); return Object.values(groups); }, [stats.readerLog, library]);
     
     const isDailyGoalMet = stats.dailyCount >= stats.goals.daily;
@@ -698,8 +684,13 @@ export default function Home() {
     <>
     <div className="flex flex-col min-h-screen pb-32">
       <header className="fixed top-0 left-0 right-0 bg-slate-50/90 backdrop-blur-md z-[100] flex items-center justify-between px-6 py-4">
-        {/* UPDATED: Open Scanner Modal */}
-        <button onClick={() => setScannerOpen(true)} className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"><ScanBarcode size={28} className="text-slate-900" /></button>
+        {/* MODIFIED: Disabled Scanner Button */}
+        <button 
+            onClick={() => alert("Scan Barcode to Add to Library: Feature Coming Soon")} 
+            className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"
+        >
+            <ScanBarcode size={28} className="text-slate-900" />
+        </button>
         <div className="flex items-center gap-3">
             <div className="relative">
                 <button onClick={() => setShowReaderMenu(!showReaderMenu)} className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm ring-1 ring-slate-200 active:scale-90 transition-transform">
@@ -735,20 +726,13 @@ export default function Home() {
         onAdd={handleAddBook} 
         readers={readers.slice(0, -1)} 
         activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader}
-        initialQuery={scannedIsbn} // Pass scanner result
+        initialQuery={''} 
     />
     <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onDeleteAsset={handleDeleteAsset} onToggleStatus={handleToggleStatus} />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
     <AvatarModal isOpen={isAvatarModalOpen} onClose={() => setAvatarModalOpen(false)} onSave={handleSaveAvatar} currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null} name={editingAvatarFor || ''} />
-    
-    {/* NEW: Scanner Modal */}
-    <ScannerModal 
-        isOpen={isScannerOpen} 
-        onClose={() => setScannerOpen(false)} 
-        onDetected={handleScanDetected} 
-    />
     </>
   );
 };
