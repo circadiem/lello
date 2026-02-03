@@ -13,12 +13,12 @@ interface ScannerModalProps {
 export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerModalProps) {
   const [error, setError] = useState<string | null>(null);
 
+  // FIX: options -> constraints
   const { ref } = useZxing({
     onDecodeResult(result) {
       onDetected(result.getText());
     },
     onError(err) {
-      // Ignore frame errors, but log if permission denied
       if (err.name === 'NotAllowedError') {
           setError("Camera permission denied. Please enable it in settings.");
       }
@@ -51,7 +51,7 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
 
         {/* Camera Viewport */}
         <div className="relative aspect-[3/4] bg-slate-900 flex items-center justify-center overflow-hidden">
-            {/* FIX: Added autoPlay, playsInline, muted for iOS support */}
+            {/* FIX: Mandatory attributes for mobile support */}
             <video 
                 ref={ref} 
                 className="w-full h-full object-cover" 

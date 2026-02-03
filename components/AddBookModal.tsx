@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown } from 'lucide-react';
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare } from 'lucide-react';
 
 export interface GoogleBook {
   id: string; 
@@ -211,6 +211,8 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
         {/* Results Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 min-h-[200px]">
+           
+           {/* 1. Best Match View */}
            {!showAllResults && results.length > 0 && (
                <div className="animate-in fade-in zoom-in-95 duration-300">
                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pl-2">Top Match</p>
@@ -244,6 +246,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                </div>
            )}
 
+           {/* 2. List View (Expanded) */}
            {showAllResults && results.map((book, i) => (
              <button 
                key={i} 
@@ -268,6 +271,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
         {/* Footer */}
         <div className="p-6 bg-white border-t border-slate-100 space-y-4">
+          
           {selectedBook && (
               <div className="space-y-3 animate-in slide-in-from-bottom-2">
                   <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
