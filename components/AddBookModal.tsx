@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Users } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown } from 'lucide-react';
 
 export interface GoogleBook {
   id: string; 
@@ -11,8 +10,6 @@ export interface GoogleBook {
   coverUrl: string | null;
   description: string;
   pageCount: number;
-  source?: 'community' | 'google';
-  popularity?: number;
 }
 
 interface AddBookModalProps {
@@ -39,12 +36,11 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   // Initialize
   useEffect(() => {
     if (isOpen) {
-        // If coming from scanner, set query and search immediately
+        setQuery(initialQuery);
+        // If passed an ISBN from scanner, search immediately
         if (initialQuery) {
-            setQuery(initialQuery);
             searchBooks(initialQuery);
         } else {
-            setQuery('');
             setResults([]);
             setSelectedBook(null);
         }
@@ -72,7 +68,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
       return () => clearTimeout(delayDebounceFn);
   }, [query, initialQuery]);
 
-  // Robust Search Logic
   const searchBooks = async (searchTerm: string) => {
     if (!searchTerm || searchTerm.length < 2) return;
     setLoading(true);
@@ -83,44 +78,23 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_BOOKS_API_KEY;
 
     if (!apiKey) {
-        setError("Missing API Key.");
+        setError("Configuration Error: Missing Google API Key.");
         setLoading(false);
         return;
     }
 
     try {
-      // 1. SAFE COMMUNITY SEARCH
-      // We wrap this in a try/catch so it doesn't break the Google search if RPC fails
-      let communityBooks: GoogleBook[] = [];
-      try {
-          const { data, error } = await supabase.rpc('search_global_books', { keyword: searchTerm });
-          if (!error && data) {
-              communityBooks = data.map((b: any, i: number) => ({
-                  id: `lello-${i}`,
-                  title: b.title,
-                  author: b.author,
-                  coverUrl: b.cover_url,
-                  description: '',
-                  pageCount: 0,
-                  source: 'community',
-                  popularity: b.popularity
-              }));
-          }
-      } catch (err) {
-          console.warn("Community search skipped:", err);
+      // Simple, robust fetch
+      const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=20&printType=books`);
+      
+      if (!response.ok) {
+          throw new Error(`Google API Error: ${response.status}`);
       }
 
-      // 2. GOOGLE SEARCH (The Backpack)
-      // Added printType=books to filter magazines
-      const googleRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`);
+      const data = await response.json();
       
-      if (!googleRes.ok) throw new Error("Search failed.");
-
-      const googleData = await googleRes.json();
-      
-      let googleBooks: GoogleBook[] = [];
-      if (googleData.items) {
-          googleBooks = googleData.items
+      if (data.items) {
+        let formatted: GoogleBook[] = data.items
             .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
             .map((item: any) => ({
                 id: item.id,
@@ -128,54 +102,42 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
                 coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
                 description: item.volumeInfo.description || '',
-                pageCount: item.volumeInfo.pageCount || 0,
-                source: 'google',
-                popularity: 0
+                pageCount: item.volumeInfo.pageCount || 0
             }));
+
+        // Deduplicate
+        formatted = formatted.filter((book, index, self) => 
+            index === self.findIndex((t) => (
+                t.title === book.title && t.author === book.author
+            ))
+        );
+
+        // Smart Sort: Prioritize books with covers and exact matches
+        formatted.sort((a, b) => {
+            const queryLower = searchTerm.toLowerCase();
+            const aTitle = a.title.toLowerCase();
+            const bTitle = b.title.toLowerCase();
+
+            // 1. Cover Priority
+            if (a.coverUrl && !b.coverUrl) return -1;
+            if (!a.coverUrl && b.coverUrl) return 1;
+
+            // 2. Exact Title Match
+            if (aTitle === queryLower && bTitle !== queryLower) return -1;
+            if (bTitle === queryLower && aTitle !== queryLower) return 1;
+
+            return 0;
+        });
+
+        // Auto-select the first valid result
+        if (formatted.length > 0) setSelectedBook(formatted[0]); 
+        setResults(formatted);
+      } else {
+        setResults([]);
       }
-
-      // 3. MERGE
-      const combined = [...communityBooks];
-      googleBooks.forEach(gBook => {
-          const isDuplicate = combined.some(cBook => 
-              cBook.title.toLowerCase() === gBook.title.toLowerCase() && 
-              cBook.author.toLowerCase() === gBook.author.toLowerCase()
-          );
-          if (!isDuplicate) combined.push(gBook);
-      });
-
-      // 4. SMART SORT
-      combined.sort((a, b) => {
-          const queryLower = searchTerm.toLowerCase();
-          const aTitle = a.title.toLowerCase();
-          const bTitle = b.title.toLowerCase();
-
-          // Rule 1: Community Verified
-          if (a.source === 'community' && b.source !== 'community') return -1;
-          if (b.source === 'community' && a.source !== 'community') return 1;
-
-          // Rule 2: Has Cover?
-          if (a.coverUrl && !b.coverUrl) return -1;
-          if (!a.coverUrl && b.coverUrl) return 1;
-
-          // Rule 3: Exact Title Match
-          if (aTitle === queryLower && bTitle !== queryLower) return -1;
-          if (bTitle === queryLower && aTitle !== queryLower) return 1;
-
-          // Rule 4: Starts With
-          if (aTitle.startsWith(queryLower) && !bTitle.startsWith(queryLower)) return -1;
-          if (bTitle.startsWith(queryLower) && !aTitle.startsWith(queryLower)) return 1;
-
-          return 0;
-      });
-
-      // Auto-select the first valid result
-      if (combined.length > 0) setSelectedBook(combined[0]); 
-      setResults(combined);
-
     } catch (err: any) {
       console.error(err);
-      setError("Failed to search books.");
+      setError(`Search failed: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -251,14 +213,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 min-h-[200px]">
            {!showAllResults && results.length > 0 && (
                <div className="animate-in fade-in zoom-in-95 duration-300">
-                   <div className="flex items-center gap-2 mb-3 pl-2">
-                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Top Match</p>
-                       {results[0].source === 'community' && (
-                           <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded-full flex items-center gap-1">
-                               <Users size={10} /> Community Verified
-                           </span>
-                       )}
-                   </div>
+                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pl-2">Top Match</p>
                    
                    <button 
                         onClick={() => setSelectedBook(results[0])}
@@ -299,10 +254,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                   {book.coverUrl ? <img src={book.coverUrl} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
                </div>
                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
-                    {book.source === 'community' && <Users size={12} className="text-indigo-500" />}
-                  </div>
+                  <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
                   <p className="text-xs text-slate-500 font-medium line-clamp-1">{book.author}</p>
                </div>
                {selectedBook?.title === book.title && <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white"><Check size={14} strokeWidth={4} /></div>}
@@ -314,6 +266,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            )}
         </div>
 
+        {/* Footer */}
         <div className="p-6 bg-white border-t border-slate-100 space-y-4">
           {selectedBook && (
               <div className="space-y-3 animate-in slide-in-from-bottom-2">
