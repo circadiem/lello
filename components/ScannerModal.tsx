@@ -15,15 +15,16 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
 
   const { ref } = useZxing({
     onDecodeResult(result) {
-      // Once we find a barcode, pass it up and close immediately
       onDetected(result.getText());
     },
     onError(err) {
-      // Ignore scan errors (they happen every frame no barcode is found)
+      // Ignore errors while scanning
     },
-    options: {
-        // Prefer back camera
-        deviceId: { exact: "environment" } 
+    // FIX: Use 'constraints' and 'facingMode'
+    constraints: {
+      video: {
+        facingMode: 'environment'
+      }
     }
   });
 
@@ -48,7 +49,6 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
 
         {/* Camera Viewport */}
         <div className="relative aspect-[3/4] bg-slate-900 flex items-center justify-center overflow-hidden">
-            {/* The Video Element */}
             <video ref={ref} className="w-full h-full object-cover" />
             
             {/* Guide Box Overlay */}
@@ -60,16 +60,6 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
                     <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-emerald-500 -mb-1 -mr-1" />
                 </div>
             </div>
-
-            {/* Error State */}
-            {error && (
-                <div className="absolute inset-0 flex items-center justify-center p-6 text-center z-30 bg-black/80">
-                    <div className="text-red-400 font-bold flex flex-col items-center gap-2">
-                        <AlertCircle size={32} />
-                        <p>{error}</p>
-                    </div>
-                </div>
-            )}
         </div>
 
         {/* Footer */}
