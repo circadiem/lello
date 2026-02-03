@@ -13,12 +13,12 @@ interface ScannerModalProps {
 export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerModalProps) {
   const [error, setError] = useState<string | null>(null);
 
-  // FIX: options -> constraints
   const { ref } = useZxing({
     onDecodeResult(result) {
       onDetected(result.getText());
     },
-    onError(err) {
+    // FIX: Typed err as 'any' to satisfy TypeScript
+    onError(err: any) {
       if (err.name === 'NotAllowedError') {
           setError("Camera permission denied. Please enable it in settings.");
       }
@@ -35,8 +35,6 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 p-4 animate-in fade-in duration-200">
       <div className="w-full max-w-md bg-black rounded-3xl overflow-hidden relative border border-slate-800 shadow-2xl flex flex-col">
-        
-        {/* Header */}
         <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-20">
             <span className="text-white font-bold flex items-center gap-2 text-lg drop-shadow-md">
                 <Camera size={24} /> Scan ISBN
@@ -49,9 +47,7 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
             </button>
         </div>
 
-        {/* Camera Viewport */}
         <div className="relative aspect-[3/4] bg-slate-900 flex items-center justify-center overflow-hidden">
-            {/* FIX: Mandatory attributes for mobile support */}
             <video 
                 ref={ref} 
                 className="w-full h-full object-cover" 
@@ -60,7 +56,6 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
                 muted 
             />
             
-            {/* Guide Box Overlay */}
             <div className="absolute inset-0 border-[50px] border-black/50 z-10 pointer-events-none">
                 <div className="w-full h-full border-2 border-white/50 relative">
                     <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-emerald-500 -mt-1 -ml-1" />
@@ -70,7 +65,6 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
                 </div>
             </div>
 
-            {/* Error State */}
             {error && (
                 <div className="absolute inset-0 flex items-center justify-center p-6 text-center z-30 bg-black/80">
                     <div className="text-red-400 font-bold flex flex-col items-center gap-2">
@@ -81,7 +75,6 @@ export default function ScannerModal({ isOpen, onClose, onDetected }: ScannerMod
             )}
         </div>
 
-        {/* Footer */}
         <div className="p-8 bg-slate-900 text-center">
             <p className="text-slate-400 font-medium">Point your camera at the barcode on the back of the book.</p>
         </div>

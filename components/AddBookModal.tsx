@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare } from 'lucide-react';
+// FIX: Added ChevronDown to imports
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown } from 'lucide-react';
 
 export interface GoogleBook {
   id: string; 
@@ -33,11 +34,9 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   const [note, setNote] = useState('');
   const [showAllResults, setShowAllResults] = useState(false);
 
-  // Initialize
   useEffect(() => {
     if (isOpen) {
         setQuery(initialQuery);
-        // If passed an ISBN from scanner, search immediately
         if (initialQuery) {
             searchBooks(initialQuery);
         } else {
@@ -57,7 +56,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
   }, [isOpen, activeReader, readers, initialQuery]);
 
-  // Debounce Logic
   useEffect(() => {
       const delayDebounceFn = setTimeout(() => {
         if (query && query.length >= 3 && query !== initialQuery) {
@@ -84,7 +82,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
 
     try {
-      // Simple, robust fetch
       const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=20&printType=books`);
       
       if (!response.ok) {
@@ -105,31 +102,29 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 pageCount: item.volumeInfo.pageCount || 0
             }));
 
-        // Deduplicate
         formatted = formatted.filter((book, index, self) => 
             index === self.findIndex((t) => (
                 t.title === book.title && t.author === book.author
             ))
         );
 
-        // Smart Sort: Prioritize books with covers and exact matches
         formatted.sort((a, b) => {
             const queryLower = searchTerm.toLowerCase();
             const aTitle = a.title.toLowerCase();
             const bTitle = b.title.toLowerCase();
 
-            // 1. Cover Priority
             if (a.coverUrl && !b.coverUrl) return -1;
             if (!a.coverUrl && b.coverUrl) return 1;
 
-            // 2. Exact Title Match
             if (aTitle === queryLower && bTitle !== queryLower) return -1;
             if (bTitle === queryLower && aTitle !== queryLower) return 1;
+
+            if (aTitle.startsWith(queryLower) && !bTitle.startsWith(queryLower)) return -1;
+            if (bTitle.startsWith(queryLower) && !aTitle.startsWith(queryLower)) return 1;
 
             return 0;
         });
 
-        // Auto-select the first valid result
         if (formatted.length > 0) setSelectedBook(formatted[0]); 
         setResults(formatted);
       } else {
@@ -161,7 +156,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
       
       <div className="relative w-full max-w-lg h-[90vh] sm:h-auto bg-slate-50 rounded-t-[2rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300">
         
-        {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Add Book</h2>
           <button onClick={onClose} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200 transition-colors">
@@ -169,7 +163,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           </button>
         </div>
 
-        {/* Search Area */}
         <div className="p-6 bg-white space-y-4 shadow-sm z-10">
            <div className="flex gap-2">
              <div className="relative flex-1">
@@ -209,10 +202,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            )}
         </div>
 
-        {/* Results Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 min-h-[200px]">
-           
-           {/* 1. Best Match View */}
            {!showAllResults && results.length > 0 && (
                <div className="animate-in fade-in zoom-in-95 duration-300">
                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 pl-2">Top Match</p>
@@ -246,7 +236,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                </div>
            )}
 
-           {/* 2. List View (Expanded) */}
            {showAllResults && results.map((book, i) => (
              <button 
                key={i} 
@@ -257,7 +246,9 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                   {book.coverUrl ? <img src={book.coverUrl} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
                </div>
                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
+                  </div>
                   <p className="text-xs text-slate-500 font-medium line-clamp-1">{book.author}</p>
                </div>
                {selectedBook?.title === book.title && <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white"><Check size={14} strokeWidth={4} /></div>}
@@ -269,9 +260,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            )}
         </div>
 
-        {/* Footer */}
         <div className="p-6 bg-white border-t border-slate-100 space-y-4">
-          
           {selectedBook && (
               <div className="space-y-3 animate-in slide-in-from-bottom-2">
                   <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
