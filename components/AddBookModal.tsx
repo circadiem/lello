@@ -36,12 +36,15 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   const [note, setNote] = useState('');
   const [showAllResults, setShowAllResults] = useState(false);
 
+  // Initialize
   useEffect(() => {
     if (isOpen) {
-        setQuery(initialQuery);
+        // If coming from scanner, set query and search immediately
         if (initialQuery) {
+            setQuery(initialQuery);
             searchBooks(initialQuery);
         } else {
+            setQuery('');
             setResults([]);
             setSelectedBook(null);
         }
@@ -58,7 +61,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
   }, [isOpen, activeReader, readers, initialQuery]);
 
-  // Auto-search Debounce
+  // Debounce Logic
   useEffect(() => {
       const delayDebounceFn = setTimeout(() => {
         if (query && query.length >= 3 && query !== initialQuery) {
@@ -69,6 +72,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
       return () => clearTimeout(delayDebounceFn);
   }, [query, initialQuery]);
 
+  // Robust Search Logic
   const searchBooks = async (searchTerm: string) => {
     if (!searchTerm || searchTerm.length < 2) return;
     setLoading(true);
@@ -85,7 +89,8 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
 
     try {
-      // 1. SAFE COMMUNITY SEARCH (Does not break if it fails)
+      // 1. SAFE COMMUNITY SEARCH
+      // We wrap this in a try/catch so it doesn't break the Google search if RPC fails
       let communityBooks: GoogleBook[] = [];
       try {
           const { data, error } = await supabase.rpc('search_global_books', { keyword: searchTerm });
@@ -105,8 +110,12 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           console.warn("Community search skipped:", err);
       }
 
-      // 2. GOOGLE SEARCH (Always runs)
+      // 2. GOOGLE SEARCH (The Backpack)
+      // Added printType=books to filter magazines
       const googleRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`);
+      
+      if (!googleRes.ok) throw new Error("Search failed.");
+
       const googleData = await googleRes.json();
       
       let googleBooks: GoogleBook[] = [];
@@ -114,15 +123,15 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           googleBooks = googleData.items
             .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
             .map((item: any) => ({
-              id: item.id,
-              title: item.volumeInfo.title,
-              author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
-              coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
-              description: item.volumeInfo.description || '',
-              pageCount: item.volumeInfo.pageCount || 0,
-              source: 'google',
-              popularity: 0
-          }));
+                id: item.id,
+                title: item.volumeInfo.title,
+                author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
+                coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
+                description: item.volumeInfo.description || '',
+                pageCount: item.volumeInfo.pageCount || 0,
+                source: 'google',
+                popularity: 0
+            }));
       }
 
       // 3. MERGE
@@ -135,13 +144,11 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           if (!isDuplicate) combined.push(gBook);
       });
 
-      // 4. SORT
+      // 4. SMART SORT
       combined.sort((a, b) => {
           const queryLower = searchTerm.toLowerCase();
           const aTitle = a.title.toLowerCase();
           const bTitle = b.title.toLowerCase();
-          const aAuthor = a.author.toLowerCase();
-          const bAuthor = b.author.toLowerCase();
 
           // Rule 1: Community Verified
           if (a.source === 'community' && b.source !== 'community') return -1;
@@ -151,22 +158,19 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           if (a.coverUrl && !b.coverUrl) return -1;
           if (!a.coverUrl && b.coverUrl) return 1;
 
-          // Rule 3: Exact Matches
-          const aExact = aTitle === queryLower || aAuthor === queryLower;
-          const bExact = bTitle === queryLower || bAuthor === queryLower;
-          if (aExact && !bExact) return -1;
-          if (!aExact && bExact) return 1;
+          // Rule 3: Exact Title Match
+          if (aTitle === queryLower && bTitle !== queryLower) return -1;
+          if (bTitle === queryLower && aTitle !== queryLower) return 1;
 
           // Rule 4: Starts With
-          const aStarts = aTitle.startsWith(queryLower) || aAuthor.startsWith(queryLower);
-          const bStarts = bTitle.startsWith(queryLower) || bAuthor.startsWith(queryLower);
-          if (aStarts && !bStarts) return -1;
-          if (!aStarts && bStarts) return 1;
+          if (aTitle.startsWith(queryLower) && !bTitle.startsWith(queryLower)) return -1;
+          if (bTitle.startsWith(queryLower) && !aTitle.startsWith(queryLower)) return 1;
 
           return 0;
       });
 
-      if (combined.length > 0) setSelectedBook(combined[0]);
+      // Auto-select the first valid result
+      if (combined.length > 0) setSelectedBook(combined[0]); 
       setResults(combined);
 
     } catch (err: any) {
