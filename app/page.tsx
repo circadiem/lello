@@ -9,6 +9,7 @@ import {
   } from 'lucide-react';  
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
+import ScannerModal from '@/components/ScannerModal'; // NEW COMPONENT
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
 import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
@@ -38,7 +39,7 @@ interface ReadingLog {
   reader_name: string;
   timestamp: string;
   count?: number; 
-  notes?: string; // Added notes field
+  notes?: string; 
 }
 
 interface DisplayItem {
@@ -164,16 +165,13 @@ const LandingPage = () => {
                     </span>
                     Beta Access Open
                 </div>
-                
                 <h1 className="text-5xl sm:text-7xl font-extrabold text-slate-900 tracking-tight mb-6 leading-tight">
                     Capture every chapter <br className="hidden sm:block" />
                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">of their childhood.</span>
                 </h1>
-                
                 <p className="text-lg text-slate-500 font-medium mb-10 max-w-xl leading-relaxed">
                     From their first picture book to their first novel. Track the journey, celebrate the milestones, and foster a love for learning.
                 </p>
-
                 <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100">
                     <div className="flex gap-4 mb-6 p-1 bg-slate-50 rounded-xl">
                         <button onClick={() => setIsSignUp(false)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>Log In</button>
@@ -229,6 +227,10 @@ export default function Home() {
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
   const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
+  
+  // NEW: Scanner State
+  const [isScannerOpen, setScannerOpen] = useState(false);
+  const [scannedIsbn, setScannedIsbn] = useState('');
 
   // --- INITIALIZE ---
   useEffect(() => {
@@ -311,14 +313,19 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
-  // UPDATED: Handle adding books (with logging and notes)
+  // NEW: Scanner detected ISBN
+  const handleScanDetected = (isbn: string) => {
+      setScannerOpen(false); // Close scanner
+      setScannedIsbn(isbn); // Save ISBN
+      setAddModalOpen(true); // Open Add Modal (it will auto-search)
+  };
+
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
     setAddModalOpen(false); 
+    setScannedIsbn(''); // Reset scanner state
     if (!session) return;
 
-    // 1. Add to Library Table
     const existingBook = library.find(b => b.title === book.title && b.author === book.author);
-    
     if (!existingBook) { 
         const { data: newBook } = await supabase.from('library').insert({ 
             user_id: session.user.id, 
@@ -327,32 +334,26 @@ export default function Home() {
             cover_url: book.coverUrl, 
             ownership_status: status 
         }).select().single();
-        
         if (newBook) setLibrary(prev => [...prev, newBook as Book]); 
     }
 
-    // 2. STOP if Registry item OR if user unchecked "Log reading session"
     if (status === 'wishlist' || !shouldLog) return;
 
-    // 3. Create Reading Logs with Notes
     const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
     const timestamp = new Date().toISOString();
-
     const newLogs = readersToAdd.map(reader => ({ 
         user_id: session.user.id, 
         book_title: book.title, 
         book_author: book.author, 
         reader_name: reader, 
         timestamp: timestamp,
-        notes: note || null // Save the note
+        notes: note || null 
     }));
     
     const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
-    
     if (insertedLogs) { 
         const castLogs = insertedLogs as ReadingLog[]; 
         setLogs(prev => [...castLogs, ...prev]); 
-        
         setSelectedBook({ 
             id: castLogs[0].id, 
             title: book.title, 
@@ -386,7 +387,6 @@ export default function Home() {
       }
   };
 
-  // UPDATED: Pass notes into history view
   const selectedBookHistory = useMemo(() => { 
       if (!selectedBook) return []; 
       return logs
@@ -425,7 +425,6 @@ export default function Home() {
                           <div key={kid} className="p-4 bg-slate-50 rounded-3xl border border-slate-100">
                               <div className="flex items-center justify-between mb-4">
                                   <div className="flex items-center gap-3">
-                                      {/* Clickable Avatar to Edit */}
                                       <button onClick={() => handleOpenAvatarModal(kid)} className="relative group">
                                           <img src={getAvatarUrl(kid, readerAvatars)} className="w-10 h-10 rounded-full bg-white shadow-sm object-cover" />
                                           <div className="absolute inset-0 bg-black/20 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -699,7 +698,8 @@ export default function Home() {
     <>
     <div className="flex flex-col min-h-screen pb-32">
       <header className="fixed top-0 left-0 right-0 bg-slate-50/90 backdrop-blur-md z-[100] flex items-center justify-between px-6 py-4">
-        <button onClick={() => setAddModalOpen(true)} className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"><ScanBarcode size={28} className="text-slate-900" /></button>
+        {/* UPDATED: Open Scanner Modal */}
+        <button onClick={() => setScannerOpen(true)} className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"><ScanBarcode size={28} className="text-slate-900" /></button>
         <div className="flex items-center gap-3">
             <div className="relative">
                 <button onClick={() => setShowReaderMenu(!showReaderMenu)} className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm ring-1 ring-slate-200 active:scale-90 transition-transform">
@@ -729,12 +729,26 @@ export default function Home() {
       {readers.length > 0 && activeReader !== readers[readers.length-1] && (<div className="fixed bottom-24 left-0 right-0 flex justify-center z-40 pointer-events-none"><button onClick={() => setAddModalOpen(true)} className="pointer-events-auto bg-slate-900 text-slate-50 px-10 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"><Plus size={20} strokeWidth={3} /><span>Add</span></button></div>)}
     </div>
     
-    <AddBookModal isOpen={isAddModalOpen} onClose={() => setAddModalOpen(false)} onAdd={handleAddBook} readers={readers.slice(0, -1)} activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader} />
+    <AddBookModal 
+        isOpen={isAddModalOpen} 
+        onClose={() => setAddModalOpen(false)} 
+        onAdd={handleAddBook} 
+        readers={readers.slice(0, -1)} 
+        activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader}
+        initialQuery={scannedIsbn} // Pass scanner result
+    />
     <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onDeleteAsset={handleDeleteAsset} onToggleStatus={handleToggleStatus} />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
     <AvatarModal isOpen={isAvatarModalOpen} onClose={() => setAvatarModalOpen(false)} onSave={handleSaveAvatar} currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null} name={editingAvatarFor || ''} />
+    
+    {/* NEW: Scanner Modal */}
+    <ScannerModal 
+        isOpen={isScannerOpen} 
+        onClose={() => setScannerOpen(false)} 
+        onDetected={handleScanDetected} 
+    />
     </>
   );
 };

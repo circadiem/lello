@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Users } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient'; // We need this for the "Community Search"
+import { supabase } from '@/lib/supabaseClient';
 
 export interface GoogleBook {
   id: string; 
@@ -11,8 +11,8 @@ export interface GoogleBook {
   coverUrl: string | null;
   description: string;
   pageCount: number;
-  source?: 'community' | 'google'; // To track where it came from
-  popularity?: number; // How many users have this
+  source?: 'community' | 'google';
+  popularity?: number;
 }
 
 interface AddBookModalProps {
@@ -21,29 +21,34 @@ interface AddBookModalProps {
   onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => void;
   readers: string[];
   activeReader: string;
+  initialQuery?: string; // NEW: Accept ISBN from scanner
 }
 
-export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeReader }: AddBookModalProps) {
-  const [query, setQuery] = useState('');
+export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeReader, initialQuery = '' }: AddBookModalProps) {
+  const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<GoogleBook[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Selection State
   const [selectedBook, setSelectedBook] = useState<GoogleBook | null>(null);
   const [selectedReaders, setSelectedReaders] = useState<string[]>([activeReader]);
   const [logSession, setLogSession] = useState(true);
   const [note, setNote] = useState('');
-  
-  // UX State
   const [showAllResults, setShowAllResults] = useState(false);
 
+  // Initialize
   useEffect(() => {
     if (isOpen) {
-        setQuery('');
-        setResults([]);
+        setQuery(initialQuery); // Set initial ISBN if provided
+        // If we have an initial query (from scanner), search immediately
+        if (initialQuery) {
+            searchBooks(initialQuery);
+        } else {
+            setResults([]);
+            setSelectedBook(null);
+        }
+        
         setError(null);
-        setSelectedBook(null);
         setLogSession(true);
         setNote('');
         setShowAllResults(false);
@@ -53,10 +58,22 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
             setSelectedReaders([readers[0]]);
         }
     }
-  }, [isOpen, activeReader, readers]);
+  }, [isOpen, activeReader, readers, initialQuery]);
 
-  const searchBooks = async () => {
-    if (!query || query.length < 3) return;
+  // NEW: Auto-Populate / Debounce Search
+  useEffect(() => {
+      const delayDebounceFn = setTimeout(() => {
+        // Only auto-search if user typed enough chars and it's NOT the initial query (which is handled above)
+        if (query && query.length >= 3 && query !== initialQuery) {
+          searchBooks(query);
+        }
+      }, 800); // 800ms wait time
+
+      return () => clearTimeout(delayDebounceFn);
+  }, [query, initialQuery]);
+
+  const searchBooks = async (searchTerm: string) => {
+    if (!searchTerm || searchTerm.length < 2) return;
     setLoading(true);
     setError(null);
     setResults([]);
@@ -71,15 +88,13 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
 
     try {
-      // 1. RUN PARALLEL SEARCHES (Community DB + Google API)
       const [communityRes, googleRes] = await Promise.all([
-          supabase.rpc('search_global_books', { keyword: query }), // Call our new SQL function
-          fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&key=${apiKey}&maxResults=20`)
+          supabase.rpc('search_global_books', { keyword: searchTerm }), 
+          fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`) 
       ]);
 
-      // 2. Process Community Results
       const communityBooks: GoogleBook[] = (communityRes.data || []).map((b: any, i: number) => ({
-          id: `lello-${i}`, // Internal ID
+          id: `lello-${i}`,
           title: b.title,
           author: b.author,
           coverUrl: b.cover_url,
@@ -89,23 +104,25 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           popularity: b.popularity
       }));
 
-      // 3. Process Google Results
       const googleData = await googleRes.json();
-      let googleBooks: GoogleBook[] = (googleData.items || []).map((item: any) => ({
-          id: item.id,
-          title: item.volumeInfo.title,
-          author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
-          coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
-          description: item.volumeInfo.description || '',
-          pageCount: item.volumeInfo.pageCount || 0,
-          source: 'google',
-          popularity: 0
-      }));
-
-      // 4. MERGE & DEDUPLICATE
-      // Combine lists, but filter out Google books that are duplicates of Community books
-      const combined = [...communityBooks];
+      let googleBooks: GoogleBook[] = [];
       
+      if (googleData.items) {
+          googleBooks = googleData.items
+            .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
+            .map((item: any) => ({
+              id: item.id,
+              title: item.volumeInfo.title,
+              author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
+              coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
+              description: item.volumeInfo.description || '',
+              pageCount: item.volumeInfo.pageCount || 0,
+              source: 'google',
+              popularity: 0
+          }));
+      }
+
+      const combined = [...communityBooks];
       googleBooks.forEach(gBook => {
           const isDuplicate = combined.some(cBook => 
               cBook.title.toLowerCase() === gBook.title.toLowerCase() && 
@@ -114,34 +131,38 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           if (!isDuplicate) combined.push(gBook);
       });
 
-      // 5. THE "SMART SORT" ALGORITHM
       combined.sort((a, b) => {
-          const queryLower = query.toLowerCase();
+          const queryLower = searchTerm.toLowerCase();
+          
           const aTitle = a.title.toLowerCase();
           const bTitle = b.title.toLowerCase();
+          const aAuthor = a.author.toLowerCase();
+          const bAuthor = b.author.toLowerCase();
 
-          // Rule 1: Community Verified (Already in the DB) - HIGHEST PRIORITY
           if (a.source === 'community' && b.source !== 'community') return -1;
           if (b.source === 'community' && a.source !== 'community') return 1;
 
-          // Rule 2: Has Cover?
           if (a.coverUrl && !b.coverUrl) return -1;
           if (!a.coverUrl && b.coverUrl) return 1;
 
-          // Rule 3: Exact Title Match?
-          if (aTitle === queryLower && bTitle !== queryLower) return -1;
-          if (bTitle === queryLower && aTitle !== queryLower) return 1;
+          const aExact = aTitle === queryLower || aAuthor === queryLower;
+          const bExact = bTitle === queryLower || bAuthor === queryLower;
+          if (aExact && !bExact) return -1;
+          if (!aExact && bExact) return 1;
 
-          // Rule 4: Starts With Query?
-          const aStarts = aTitle.startsWith(queryLower);
-          const bStarts = bTitle.startsWith(queryLower);
+          const aStarts = aTitle.startsWith(queryLower) || aAuthor.startsWith(queryLower);
+          const bStarts = bTitle.startsWith(queryLower) || bAuthor.startsWith(queryLower);
           if (aStarts && !bStarts) return -1;
           if (!aStarts && bStarts) return 1;
+
+          const aAuthorContains = aAuthor.includes(queryLower);
+          const bAuthorContains = bAuthor.includes(queryLower);
+          if (aAuthorContains && !bAuthorContains) return -1;
+          if (!aAuthorContains && bAuthorContains) return 1;
 
           return 0;
       });
 
-      // Auto-select the winner
       if (combined.length > 0) setSelectedBook(combined[0]);
       setResults(combined);
 
@@ -154,7 +175,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') searchBooks();
+    if (e.key === 'Enter') searchBooks(query);
   };
 
   const toggleReader = (reader: string) => {
@@ -184,9 +205,9 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            <div className="flex gap-2">
              <div className="relative flex-1">
                <input 
-                 autoFocus
+                 autoFocus={!initialQuery} // Only autofocus if not coming from scanner
                  type="text" 
-                 placeholder="Search title, author, ISBN..." 
+                 placeholder="Search title, author, or ISBN..." 
                  className="w-full bg-slate-100 border-0 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900 transition-all"
                  value={query}
                  onChange={(e) => setQuery(e.target.value)}
@@ -194,7 +215,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                />
                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
              </div>
-             <button onClick={searchBooks} disabled={loading} className="bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 transition-colors disabled:opacity-70">
+             <button onClick={() => searchBooks(query)} disabled={loading} className="bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 transition-colors disabled:opacity-70">
                 {loading ? <Loader2 className="animate-spin" /> : <Search />}
              </button>
            </div>
@@ -251,7 +272,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                        </div>
                    </button>
 
-                   {/* "See More" Button */}
                    {results.length > 1 && (
                        <button 
                             onClick={() => setShowAllResults(true)}
@@ -292,7 +312,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
         {/* Footer */}
         <div className="p-6 bg-white border-t border-slate-100 space-y-4">
-          
           {selectedBook && (
               <div className="space-y-3 animate-in slide-in-from-bottom-2">
                   <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
