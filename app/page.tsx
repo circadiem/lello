@@ -52,7 +52,6 @@ interface DisplayItem {
   count?: number;
   rating?: number;
   ownershipStatus?: 'owned' | 'borrowed' | 'wishlist';
-  ownership_status?: 'owned' | 'borrowed' | 'wishlist';
   dailyCount?: number;
 }
 
@@ -402,7 +401,9 @@ export default function Home() {
 
   const handleToggleStatus = async (id: number | string, newStatus: 'owned' | 'borrowed' | 'wishlist') => { 
       if (!selectedBook) return; 
+      // FIX: Lookup book in Library to get real ID
       const libBook = library.find(b => b.title === selectedBook.title); 
+      
       if (libBook) { 
           await supabase.from('library').update({ ownership_status: newStatus }).eq('id', libBook.id); 
           setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, ownership_status: newStatus } : b)); 
@@ -434,9 +435,7 @@ export default function Home() {
     const chartData = useMemo(() => {
         const days = [];
         const now = new Date();
-        const currentDay = now.getDay(); // 0=Sun, 1=Mon
-        
-        // Calculate Monday of current week
+        const currentDay = now.getDay(); 
         const diff = currentDay === 0 ? 6 : currentDay - 1; 
         const monday = new Date(now);
         monday.setDate(now.getDate() - diff);
@@ -466,7 +465,7 @@ export default function Home() {
         return days; 
     }, [logs, activeReader]);
     
-    // Group history by Today/Yesterday/This Week
+    // FIX: Cross-reference Library for accurate status
     const groupedHistory = useMemo(() => { 
         const groups: { today: any[], yesterday: any[], week: any[], older: any[] } = { today: [], yesterday: [], week: [], older: [] };
         
@@ -478,6 +477,8 @@ export default function Home() {
             const dateKey = new Date(item.timestamp).toLocaleDateString();
             const key = `${dateKey}-${item.book_title}`;
             if (!aggregated[key]) {
+                const libBook = library.find(b => b.title === item.book_title && b.author === item.book_author);
+                
                 aggregated[key] = { 
                     id: item.id, 
                     title: item.book_title, 
@@ -486,7 +487,8 @@ export default function Home() {
                     dailyCount: 0, 
                     timestamp: item.timestamp, 
                     reader: item.reader_name, 
-                    notes: item.notes 
+                    notes: item.notes,
+                    ownershipStatus: libBook ? libBook.ownership_status : 'wishlist'
                 };
             }
             aggregated[key].dailyCount += 1;
@@ -542,13 +544,21 @@ export default function Home() {
                     <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isDailyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Daily Goal</p><p className="text-xl font-bold">{isDailyGoalMet ? 'Goal Achieved! ✨' : `${stats.goals.daily - stats.dailyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-lg ${isDailyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.dailyCount}/{stats.goals.daily}</p></div>
                     <div className={`mt-4 h-2 rounded-full overflow-hidden ${isDailyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isDailyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.dailyCount / stats.goals.daily) * 100, 100)}%` }} /></div>
                 </button>
+                
+                {/* FIX: Restored Weekly Goal Button */}
+                <button 
+                    onClick={() => { setEditingGoalType('weekly'); setGoalModalOpen(true); }} 
+                    className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isWeeklyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}
+                >
+                    <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isWeeklyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Weekly Goal</p><p className="text-xl font-bold">{isWeeklyGoalMet ? 'Weekly Target Met! 🏆' : `${stats.goals.weekly - stats.weeklyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-slate-400 ${isWeeklyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.weeklyCount}/{stats.goals.weekly}</p></div>
+                    <div className={`mt-4 h-2 rounded-full overflow-hidden ${isWeeklyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isWeeklyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.weeklyCount / stats.goals.weekly) * 100, 100)}%` }} /></div>
+                </button>
             </div>
             
             {groupedHistory.today.length > 0 && renderBookList(groupedHistory.today, 'Today')}
             {groupedHistory.yesterday.length > 0 && renderBookList(groupedHistory.yesterday, 'Yesterday')}
             {groupedHistory.week.length > 0 && renderBookList(groupedHistory.week, 'Earlier This Week')}
             
-            {/* Fallback if no history at all */}
             {stats.readerLog.length === 0 && (
                 <div className="text-center py-10 text-slate-400 text-sm font-medium">
                     No reading activity yet. Start logging some books!
@@ -648,135 +658,6 @@ export default function Home() {
               </button>
           </div>
       </div>
-  );
-
-  const LibraryView = () => {
-    const [search, setSearch] = useState('');
-    const [filter, setFilter] = useState<LibraryFilter>('owned');
-    const [copied, setCopied] = useState(false);
-    
-    const filteredBooks: Book[] = library.filter(book => {
-        const safeTitle = (book.title || '').toLowerCase();
-        const safeAuthor = (book.author || '').toLowerCase();
-        const searchLower = search.toLowerCase();
-        const matchesSearch = safeTitle.includes(searchLower) || safeAuthor.includes(searchLower);
-        
-        if (filter === 'owned') return matchesSearch && (book.ownership_status === 'owned' || !book.ownership_status);
-        if (filter === 'borrowed') return matchesSearch && book.ownership_status === 'borrowed';
-        if (filter === 'wishlist') return matchesSearch && book.ownership_status === 'wishlist';
-        return matchesSearch;
-    }).sort((a, b) => (getLastName(a.author || '').localeCompare(getLastName(b.author || ''))));
-    
-    const groupedBooks = filteredBooks.reduce((groups, book) => {
-        const lastName = getLastName(book.author || 'Unknown');
-        const letter = lastName.charAt(0).toUpperCase();
-        if (!groups[letter]) groups[letter] = [];
-        groups[letter].push(book);
-        return groups;
-    }, {} as Record<string, Book[]>);
-    
-    const sortedKeys = Object.keys(groupedBooks).sort();
-
-    const handleShareRegistry = () => {
-        const url = `${window.location.origin}/registry/${session.user.id}`;
-        navigator.clipboard.writeText(url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
-
-    return (
-        <div className="animate-in fade-in slide-in-from-right-8 duration-300 pb-20">
-            <div className="flex justify-between items-center pt-4 mb-4">
-                <h1 className="text-4xl font-extrabold tracking-tight">Library</h1>
-                {filter === 'wishlist' && (
-                    <button 
-                        onClick={handleShareRegistry}
-                        className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold uppercase tracking-wide flex items-center gap-2 active:scale-95 transition-all"
-                    >
-                        {copied ? <Check size={14} /> : <Share2 size={14} />}
-                        {copied ? 'Copied!' : 'Share'}
-                    </button>
-                )}
-            </div>
-
-            <div className="flex bg-slate-100 p-1 rounded-2xl mb-6">
-                <button onClick={() => setFilter('owned')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'owned' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Library</button>
-                <button onClick={() => setFilter('wishlist')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'wishlist' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Registry</button>
-                <button onClick={() => setFilter('borrowed')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${filter === 'borrowed' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400'}`}>Borrowed</button>
-            </div>
-            <input type="text" placeholder="Search..." className="w-full bg-white border border-slate-200 rounded-2xl pl-4 pr-4 py-4 mb-4" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="space-y-8">
-                {sortedKeys.map(letter => (
-                    <div key={letter}>
-                        <h2 className="text-sm font-extrabold text-slate-400 mb-4 px-2 sticky top-20">{letter}</h2>
-                        <div className="space-y-3">
-                            {groupedBooks[letter].map((book: Book) => (
-                                <button 
-                                    key={book.id} 
-                                    onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status })} 
-                                    className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform"
-                                >
-                                    <div className="w-12 h-16 shrink-0 bg-slate-100 rounded-xl overflow-hidden shadow-inner flex items-center justify-center text-slate-300">
-                                        {book.cover_url ? <img src={book.cover_url} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <p className="font-bold text-slate-900 truncate">{book.title}</p>
-                                            {filter === 'all' && book.ownership_status === 'borrowed' && (<div className="px-1.5 py-0.5 bg-indigo-100 rounded-md"><StickyNote size={10} className="text-indigo-600" /></div>)}
-                                            {(filter === 'all' || filter === 'wishlist') && book.ownership_status === 'wishlist' && (<div className="px-1.5 py-0.5 bg-orange-100 rounded-md"><Gift size={10} className="text-orange-600" /></div>)}
-                                        </div>
-                                        <p className="text-xs text-slate-500 font-medium truncate">{book.author}</p>
-                                    </div>
-                                    <ChevronRight size={20} className="text-slate-200 group-hover:text-slate-400" />
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-  };
-
-  const HomeView = () => (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
-      <section className="flex flex-col items-center justify-center py-12">
-          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Weekly Reads</h2>
-          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.weeklyCount}</div>
-          {stats.weeklyCount >= stats.goals.weekly && (
-              <div className="mt-4 px-4 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-widest animate-bounce">
-                  Weekly Target Met!
-              </div>
-          )}
-      </section>
-      <section className="space-y-8">
-        <div>
-          <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Heavy Rotation</h3>
-          <div className="grid grid-cols-3 gap-3">
-             {Object.values(stats.readerLog.reduce((acc: any, item) => {
-                 const key = item.book_title;
-                 if (!acc[key]) {
-                     acc[key] = { 
-                         id: item.id,
-                         title: item.book_title,
-                         author: item.book_author,
-                         count: 0, 
-                         cover: getBookCover(item.book_title) 
-                     };
-                 }
-                 acc[key].count++;
-                 return acc;
-             }, {})).sort((a: any, b: any) => b.count - a.count).slice(0, 3).map((item: any) => (
-               <button key={item.id} onClick={() => setSelectedBook(item)} className="relative aspect-[3/4] bg-slate-200 rounded-3xl overflow-hidden border border-slate-300 transition-transform active:scale-[0.98] group">
-                 {item.cover ? <img src={item.cover} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" /> : <div className="w-full h-full flex items-center justify-center text-slate-400"><BookOpen size={24} /></div>}
-                 <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">{item.count}</div>
-               </button>
-             ))}
-             {stats.readerLog.length === 0 && (<div className="col-span-3 py-8 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 text-xs font-bold">No reading history yet.</div>)}
-          </div>
-        </div>
-      </section>
-    </div>
   );
 
   if (loadingSession) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={32} /></div>;
