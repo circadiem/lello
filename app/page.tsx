@@ -66,6 +66,34 @@ const isToday = (isoString?: string) => {
            date.getFullYear() === today.getFullYear();
 };
 
+const isYesterday = (isoString?: string) => {
+    if (!isoString) return false;
+    const date = new Date(isoString);
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return date.getDate() === yesterday.getDate() &&
+           date.getMonth() === yesterday.getMonth() &&
+           date.getFullYear() === yesterday.getFullYear();
+};
+
+// Returns true if date is in current week (Mon-Sun) but NOT today or yesterday
+const isEarlierThisWeek = (isoString?: string) => {
+    if (!isoString) return false;
+    if (isToday(isoString) || isYesterday(isoString)) return false;
+    
+    const date = new Date(isoString);
+    const now = new Date();
+    
+    // Get Monday of current week
+    const day = now.getDay(); 
+    const diff = day === 0 ? 6 : day - 1; // Adjust so Mon=0, Sun=6 (relative to Mon start)
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - diff);
+    monday.setHours(0,0,0,0);
+    
+    return date >= monday && date <= now;
+};
+
 const isThisWeek = (isoString?: string) => {
     if (!isoString) return false;
     const date = new Date(isoString);
@@ -87,28 +115,33 @@ const getAvatarUrl = (name: string, map: Record<string, string>) => {
 
 // --- COMPONENTS ---
 const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: boolean }[] }) => {
-    const max = Math.max(...data.map(d => d.count), 1); 
+    // Ensure max is at least 4 so the bars don't look huge if count is 1
+    const max = Math.max(...data.map(d => d.count), 4); 
+    
     return (
-        <div className="w-full h-48 bg-slate-900 rounded-[2.5rem] p-6 flex flex-col justify-between shadow-xl mb-8">
+        <div className="w-full h-56 bg-slate-900 rounded-[2.5rem] p-6 flex flex-col justify-between shadow-xl mb-8 overflow-hidden">
             <div className="flex justify-between items-start mb-4">
                 <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Last 7 Days</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">This Week</p>
                     <p className="text-white font-bold text-xl">Weekly Count</p>
                 </div>
                 <div className="p-2 bg-slate-800 rounded-full text-emerald-400">
                     <BarChart3 size={20} />
                 </div>
             </div>
-            <div className="flex items-end justify-between gap-2 h-full pb-2">
+            {/* Added px-2 to prevent edge cutting */}
+            <div className="flex items-end justify-between gap-2 h-full pb-2 px-2">
                 {data.map((item, i) => (
                     <div key={i} className="flex flex-col items-center gap-2 flex-1">
                         <div className="w-full relative group flex items-end justify-center h-24">
+                            {/* Bar */}
                             <div 
                                 style={{ height: `${(item.count / max) * 100}%` }} 
                                 className={`w-full max-w-[12px] rounded-full transition-all duration-500 min-h-[4px] ${item.isToday ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]' : 'bg-slate-700 group-hover:bg-slate-600'}`} 
                             />
+                            {/* Tooltip */}
                             {item.count > 0 && (
-                                <div className="absolute -top-8 bg-white text-slate-900 text-[10px] font-bold px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                                <div className="absolute -top-8 bg-white text-slate-900 text-[10px] font-bold px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-md">
                                     {item.count}
                                 </div>
                             )}
@@ -394,7 +427,136 @@ export default function Home() {
 
   const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
-  // --- EXPANDED VIEW COMPONENTS ---
+  // --- VIEW COMPONENTS ---
+
+  const HistoryView = () => {
+    // Generate Mon-Sun chart data
+    const chartData = useMemo(() => {
+        const days = [];
+        const now = new Date();
+        const currentDay = now.getDay(); // 0=Sun, 1=Mon
+        
+        // Calculate Monday of current week
+        const diff = currentDay === 0 ? 6 : currentDay - 1; 
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - diff);
+
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(monday);
+            d.setDate(monday.getDate() + i);
+            const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
+            
+            // Only count if date is today or in the past
+            let count = 0;
+            if (d <= now) {
+                count = logs.filter(item => { 
+                    const itemDate = new Date(item.timestamp); 
+                    return item.reader_name === activeReader && 
+                           itemDate.getDate() === d.getDate() && 
+                           itemDate.getMonth() === d.getMonth(); 
+                }).length;
+            }
+            
+            days.push({ 
+                day: dayName, 
+                count, 
+                isToday: d.getDate() === now.getDate() && d.getMonth() === now.getMonth() 
+            }); 
+        } 
+        return days; 
+    }, [logs, activeReader]);
+    
+    // Group history by Today/Yesterday/This Week
+    const groupedHistory = useMemo(() => { 
+        const groups: { today: any[], yesterday: any[], week: any[], older: any[] } = { today: [], yesterday: [], week: [], older: [] };
+        
+        const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        
+        // Aggregate duplicates per day
+        const aggregated: Record<string, any> = {};
+        sortedLog.forEach(item => {
+            const dateKey = new Date(item.timestamp).toLocaleDateString();
+            const key = `${dateKey}-${item.book_title}`;
+            if (!aggregated[key]) {
+                aggregated[key] = { 
+                    id: item.id, 
+                    title: item.book_title, 
+                    author: item.book_author, 
+                    cover: getBookCover(item.book_title), 
+                    dailyCount: 0, 
+                    timestamp: item.timestamp, 
+                    reader: item.reader_name, 
+                    notes: item.notes 
+                };
+            }
+            aggregated[key].dailyCount += 1;
+        });
+
+        Object.values(aggregated).forEach((item: any) => {
+            if (isToday(item.timestamp)) groups.today.push(item);
+            else if (isYesterday(item.timestamp)) groups.yesterday.push(item);
+            else if (isEarlierThisWeek(item.timestamp)) groups.week.push(item);
+            else groups.older.push(item);
+        });
+        
+        return groups;
+    }, [stats.readerLog, library]);
+    
+    const isDailyGoalMet = stats.dailyCount >= stats.goals.daily;
+    const isWeeklyGoalMet = stats.weeklyCount >= stats.goals.weekly;
+
+    const renderBookList = (items: any[], title: string) => (
+        <div className="mb-6">
+            <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-3 pl-2">{title}</h3>
+            <div className="space-y-3">
+                {items.map((item: any) => (
+                    <div key={item.id} className="w-full bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
+                        <button onClick={() => setSelectedBook(item)} className="flex items-center gap-4 flex-1 text-left">
+                            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden">
+                                {item.cover ? <img src={item.cover} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
+                            </div>
+                            <div className="flex-1 min-w-0 pr-2">
+                                <p className="font-bold text-slate-900 line-clamp-1">{item.title}</p>
+                                <p className="text-xs text-slate-500 font-medium line-clamp-1">{item.author}</p>
+                            </div>
+                        </button>
+                        <div className="flex items-center gap-3">
+                            {item.dailyCount > 1 && (<span className="font-mono-tabular font-bold text-slate-400 text-sm">{item.dailyCount}x</span>)}
+                            <button onClick={(e) => handleQuickAdd(e, item)} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-90"><Plus size={18} strokeWidth={3} /></button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
+            <h1 className="text-4xl font-extrabold tracking-tight pt-4 mb-6">Activity</h1>
+            <ReadingChart data={chartData} />
+            <div className="space-y-4 mb-8">
+                <button 
+                    onClick={() => { setEditingGoalType('daily'); setGoalModalOpen(true); }} 
+                    className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isDailyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}
+                >
+                    <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isDailyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Daily Goal</p><p className="text-xl font-bold">{isDailyGoalMet ? 'Goal Achieved! ✨' : `${stats.goals.daily - stats.dailyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-lg ${isDailyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.dailyCount}/{stats.goals.daily}</p></div>
+                    <div className={`mt-4 h-2 rounded-full overflow-hidden ${isDailyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isDailyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.dailyCount / stats.goals.daily) * 100, 100)}%` }} /></div>
+                </button>
+            </div>
+            
+            {groupedHistory.today.length > 0 && renderBookList(groupedHistory.today, 'Today')}
+            {groupedHistory.yesterday.length > 0 && renderBookList(groupedHistory.yesterday, 'Yesterday')}
+            {groupedHistory.week.length > 0 && renderBookList(groupedHistory.week, 'Earlier This Week')}
+            
+            {/* Fallback if no history at all */}
+            {stats.readerLog.length === 0 && (
+                <div className="text-center py-10 text-slate-400 text-sm font-medium">
+                    No reading activity yet. Start logging some books!
+                </div>
+            )}
+        </div>
+    );
+  };
 
   const ParentDashboard = () => (
       <div className="animate-in fade-in zoom-in-95 duration-300 pb-20">
@@ -488,47 +650,6 @@ export default function Home() {
       </div>
   );
 
-  const HomeView = () => (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
-      <section className="flex flex-col items-center justify-center py-12">
-          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Weekly Reads</h2>
-          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.weeklyCount}</div>
-          {stats.weeklyCount >= stats.goals.weekly && (
-              <div className="mt-4 px-4 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-widest animate-bounce">
-                  Weekly Target Met!
-              </div>
-          )}
-      </section>
-      <section className="space-y-8">
-        <div>
-          <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Heavy Rotation</h3>
-          <div className="grid grid-cols-3 gap-3">
-             {Object.values(stats.readerLog.reduce((acc: any, item) => {
-                 const key = item.book_title;
-                 if (!acc[key]) {
-                     acc[key] = { 
-                         id: item.id,
-                         title: item.book_title,
-                         author: item.book_author,
-                         count: 0, 
-                         cover: getBookCover(item.book_title) 
-                     };
-                 }
-                 acc[key].count++;
-                 return acc;
-             }, {})).sort((a: any, b: any) => b.count - a.count).slice(0, 3).map((item: any) => (
-               <button key={item.id} onClick={() => setSelectedBook(item)} className="relative aspect-[3/4] bg-slate-200 rounded-3xl overflow-hidden border border-slate-300 transition-transform active:scale-[0.98] group">
-                 {item.cover ? <img src={item.cover} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" /> : <div className="w-full h-full flex items-center justify-center text-slate-400"><BookOpen size={24} /></div>}
-                 <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">{item.count}</div>
-               </button>
-             ))}
-             {stats.readerLog.length === 0 && (<div className="col-span-3 py-8 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 text-xs font-bold">No reading history yet.</div>)}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-
   const LibraryView = () => {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<LibraryFilter>('owned');
@@ -617,64 +738,46 @@ export default function Home() {
     );
   };
 
-  const HistoryView = () => {
-    const chartData = useMemo(() => {
-        const days = [];
-        for (let i = 6; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
-            const count = logs.filter(item => { const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length; days.push({ day: dayName, count, isToday: i === 0 }); } return days; }, [logs, activeReader]);
-    
-    const groupedHistory = useMemo(() => { const groups: Record<string, any> = {}; const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); sortedLog.forEach(item => { const dateKey = new Date(item.timestamp).toLocaleDateString(); const key = `${dateKey}-${item.book_title}`; if (!groups[key]) { groups[key] = { id: item.id, title: item.book_title, author: item.book_author, cover: getBookCover(item.book_title), dailyCount: 0, timestamp: item.timestamp, reader: item.reader_name, notes: item.notes }; } groups[key].dailyCount += 1; }); return Object.values(groups); }, [stats.readerLog, library]);
-    
-    const isDailyGoalMet = stats.dailyCount >= stats.goals.daily;
-    const isWeeklyGoalMet = stats.weeklyCount >= stats.goals.weekly;
-
-    return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
-            <h1 className="text-4xl font-extrabold tracking-tight pt-4 mb-6">Activity</h1>
-            <ReadingChart data={chartData} />
-            <div className="space-y-4 mb-8">
-                <button 
-                    onClick={() => { setEditingGoalType('daily'); setGoalModalOpen(true); }} 
-                    className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isDailyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}
-                >
-                    <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isDailyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Daily Goal</p><p className="text-xl font-bold">{isDailyGoalMet ? 'Goal Achieved! ✨' : `${stats.goals.daily - stats.dailyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-lg ${isDailyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.dailyCount}/{stats.goals.daily}</p></div>
-                    <div className={`mt-4 h-2 rounded-full overflow-hidden ${isDailyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isDailyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.dailyCount / stats.goals.daily) * 100, 100)}%` }} /></div>
-                </button>
-                
-                <button 
-                    onClick={() => { setEditingGoalType('weekly'); setGoalModalOpen(true); }} 
-                    className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isWeeklyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}
-                >
-                    <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isWeeklyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Weekly Goal</p><p className="text-xl font-bold">{isWeeklyGoalMet ? 'Weekly Target Met! 🏆' : `${stats.goals.weekly - stats.weeklyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-slate-400 ${isWeeklyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.weeklyCount}/{stats.goals.weekly}</p></div>
-                    <div className={`mt-4 h-2 rounded-full overflow-hidden ${isWeeklyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isWeeklyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.weeklyCount / stats.goals.weekly) * 100, 100)}%` }} /></div>
-                </button>
-            </div>
-            <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4 pl-2">Recent Reads</h3>
-            <div className="space-y-3">
-                {groupedHistory.map((item: any) => (
-                    <div key={item.id} className="w-full bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
-                        <button onClick={() => setSelectedBook(item)} className="flex items-center gap-4 flex-1 text-left">
-                            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden">
-                                {item.cover ? <img src={item.cover} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
-                            </div>
-                            <div className="flex-1 min-w-0 pr-2">
-                                <p className="font-bold text-slate-900 line-clamp-1">{item.title}</p>
-                                <p className="text-xs text-slate-500 font-bold">{new Date(item.timestamp).toLocaleDateString()}</p>
-                            </div>
-                        </button>
-                        <div className="flex items-center gap-3">
-                            {item.dailyCount > 1 && (<span className="font-mono-tabular font-bold text-slate-400 text-sm">{item.dailyCount}x</span>)}
-                            <button onClick={(e) => handleQuickAdd(e, item)} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-90"><Plus size={18} strokeWidth={3} /></button>
-                        </div>
-                    </div>
-                ))}
-            </div>
+  const HomeView = () => (
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
+      <section className="flex flex-col items-center justify-center py-12">
+          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Weekly Reads</h2>
+          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.weeklyCount}</div>
+          {stats.weeklyCount >= stats.goals.weekly && (
+              <div className="mt-4 px-4 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-widest animate-bounce">
+                  Weekly Target Met!
+              </div>
+          )}
+      </section>
+      <section className="space-y-8">
+        <div>
+          <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Heavy Rotation</h3>
+          <div className="grid grid-cols-3 gap-3">
+             {Object.values(stats.readerLog.reduce((acc: any, item) => {
+                 const key = item.book_title;
+                 if (!acc[key]) {
+                     acc[key] = { 
+                         id: item.id,
+                         title: item.book_title,
+                         author: item.book_author,
+                         count: 0, 
+                         cover: getBookCover(item.book_title) 
+                     };
+                 }
+                 acc[key].count++;
+                 return acc;
+             }, {})).sort((a: any, b: any) => b.count - a.count).slice(0, 3).map((item: any) => (
+               <button key={item.id} onClick={() => setSelectedBook(item)} className="relative aspect-[3/4] bg-slate-200 rounded-3xl overflow-hidden border border-slate-300 transition-transform active:scale-[0.98] group">
+                 {item.cover ? <img src={item.cover} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" /> : <div className="w-full h-full flex items-center justify-center text-slate-400"><BookOpen size={24} /></div>}
+                 <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">{item.count}</div>
+               </button>
+             ))}
+             {stats.readerLog.length === 0 && (<div className="col-span-3 py-8 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 text-xs font-bold">No reading history yet.</div>)}
+          </div>
         </div>
-    );
-  };
+      </section>
+    </div>
+  );
 
   if (loadingSession) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={32} /></div>;
   if (!session) return <LandingPage />;
@@ -684,7 +787,7 @@ export default function Home() {
     <>
     <div className="flex flex-col min-h-screen pb-32">
       <header className="fixed top-0 left-0 right-0 bg-slate-50/90 backdrop-blur-md z-[100] flex items-center justify-between px-6 py-4">
-        {/* MODIFIED: Disabled Scanner Button */}
+        {/* Scanner Disabled */}
         <button 
             onClick={() => alert("Scan Barcode to Add to Library: Feature Coming Soon")} 
             className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"

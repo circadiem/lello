@@ -14,6 +14,7 @@ export interface GoogleBook {
   source?: 'community' | 'google';
   popularity?: number;
   score?: number; 
+  originalIndex?: number; // Added for tie-breaking
 }
 
 interface AddBookModalProps {
@@ -85,9 +86,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
 
     try {
-      // 1. RUN PARALLEL SEARCHES (Fail-Safe)
-      
-      // FIX: Wrapped in an IIFE (Immediately Invoked Function Expression) to satisfy TypeScript
+      // 1. RUN PARALLEL SEARCHES
       const communityPromise = (async () => {
           try {
             const { data, error } = await supabase.rpc('search_global_books', { keyword: searchTerm });
@@ -108,7 +107,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           }
       })();
 
-      const googlePromise = fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`)
+      const googlePromise = fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=30&printType=books`)
         .then(res => res.json())
         .then(data => {
             if (!data.items) return [];
@@ -130,7 +129,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
             throw new Error("Search failed.");
         });
 
-      // Wait for both
       const [communityBooks, googleBooks] = await Promise.all([communityPromise, googlePromise]);
 
       // 2. MERGE & DEDUPLICATE
@@ -144,23 +142,44 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           if (!isDuplicate) combined.push(gBook);
       });
 
-      // 3. THE SCORING ENGINE
-      const scored = combined.map(book => {
+      // 3. THE IMPROVED SCORING ENGINE
+      const scored = combined.map((book, index) => {
           let score = 0;
-          const queryLower = searchTerm.toLowerCase();
-          const titleLower = book.title.toLowerCase();
-          const authorLower = book.author.toLowerCase();
+          const queryNorm = normalize(searchTerm);
+          const titleNorm = normalize(book.title);
+          const authorNorm = normalize(book.author);
 
-          if (titleLower === queryLower) score += 50;
+          // Rule A: EXACT AUTHOR MATCH (+60)
+          // "Dr. Seuss" query -> "Dr. Seuss" author
+          if (authorNorm === queryNorm) score += 60;
+
+          // Rule B: EXACT TITLE MATCH (+50)
+          // "The Lorax" query -> "The Lorax" title
+          else if (titleNorm === queryNorm) score += 50;
+
+          // Rule C: HAS COVER (+40)
           if (book.coverUrl) score += 40;
-          if (book.source === 'community') score += 30;
-          if (authorLower.includes(queryLower)) score += 20;
-          if (titleLower.startsWith(queryLower)) score += 10;
 
-          return { ...book, score };
+          // Rule D: COMMUNITY VERIFIED (+30)
+          if (book.source === 'community') score += 30;
+
+          // Rule E: PARTIAL AUTHOR MATCH (+20)
+          if (authorNorm.includes(queryNorm) && authorNorm !== queryNorm) score += 20;
+
+          // Rule F: STARTS WITH QUERY (+10)
+          if (titleNorm.startsWith(queryNorm)) score += 10;
+
+          // Store original index to use as tie-breaker (Google's popularity rank)
+          return { ...book, score, originalIndex: index };
       });
 
-      scored.sort((a, b) => (b.score || 0) - (a.score || 0));
+      // 4. SORT BY SCORE, THEN BY ORIGINAL GOOGLE RANK
+      scored.sort((a, b) => {
+          const scoreDiff = (b.score || 0) - (a.score || 0);
+          if (scoreDiff !== 0) return scoreDiff;
+          // If scores are tied (e.g. 5 Oliver Jeffers books), let the Google order decide
+          return (a.originalIndex || 0) - (b.originalIndex || 0);
+      });
 
       if (scored.length > 0) setSelectedBook(scored[0]);
       setResults(scored);
@@ -173,6 +192,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
   };
 
+  // Helper: "Dr. Seuss" -> "drseuss"
   const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
