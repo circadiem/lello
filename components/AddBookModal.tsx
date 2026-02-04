@@ -13,7 +13,7 @@ export interface GoogleBook {
   pageCount: number;
   source?: 'community' | 'google';
   popularity?: number;
-  score?: number; // Internal scoring for sorting
+  score?: number; 
 }
 
 interface AddBookModalProps {
@@ -37,7 +37,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   const [note, setNote] = useState('');
   const [showAllResults, setShowAllResults] = useState(false);
 
-  // Initialize
   useEffect(() => {
     if (isOpen) {
         setQuery(initialQuery);
@@ -60,7 +59,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
   }, [isOpen, activeReader, readers, initialQuery]);
 
-  // Debounce Logic
   useEffect(() => {
       const delayDebounceFn = setTimeout(() => {
         if (query && query.length >= 3 && query !== initialQuery) {
@@ -88,9 +86,11 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
     try {
       // 1. RUN PARALLEL SEARCHES (Fail-Safe)
-      // We wrap DB search in a separate promise so it doesn't kill the Google search if it fails
-      const communityPromise = supabase.rpc('search_global_books', { keyword: searchTerm })
-        .then(({ data, error }) => {
+      
+      // FIX: Wrapped in an IIFE (Immediately Invoked Function Expression) to satisfy TypeScript
+      const communityPromise = (async () => {
+          try {
+            const { data, error } = await supabase.rpc('search_global_books', { keyword: searchTerm });
             if (error) throw error;
             return (data || []).map((b: any, i: number) => ({
                 id: `lello-${i}`,
@@ -102,11 +102,11 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 source: 'community' as const,
                 popularity: b.popularity
             }));
-        })
-        .catch(err => {
+          } catch (err) {
             console.warn("Community search skipped:", err);
             return [];
-        });
+          }
+      })();
 
       const googlePromise = fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`)
         .then(res => res.json())
@@ -130,11 +130,10 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
             throw new Error("Search failed.");
         });
 
-      // Wait for both (or just Google if DB fails)
+      // Wait for both
       const [communityBooks, googleBooks] = await Promise.all([communityPromise, googlePromise]);
 
       // 2. MERGE & DEDUPLICATE
-      // We prioritize Community books. If Google finds the same book, we skip the Google version.
       const combined = [...communityBooks];
       
       googleBooks.forEach((gBook: GoogleBook) => {
@@ -152,28 +151,17 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           const titleLower = book.title.toLowerCase();
           const authorLower = book.author.toLowerCase();
 
-          // Rule A: Exact Title Match (+50)
           if (titleLower === queryLower) score += 50;
-          
-          // Rule B: Has Cover (+40)
           if (book.coverUrl) score += 40;
-
-          // Rule C: Community Verified (+30)
           if (book.source === 'community') score += 30;
-
-          // Rule D: Author Match (+20)
           if (authorLower.includes(queryLower)) score += 20;
-
-          // Rule E: Starts With Query (+10)
           if (titleLower.startsWith(queryLower)) score += 10;
 
           return { ...book, score };
       });
 
-      // 4. SORT BY SCORE
       scored.sort((a, b) => (b.score || 0) - (a.score || 0));
 
-      // Auto-select the winner
       if (scored.length > 0) setSelectedBook(scored[0]);
       setResults(scored);
 
@@ -185,7 +173,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
   };
 
-  // Helper to normalize strings for comparison (remove special chars, lowercase)
   const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -286,7 +273,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                        </div>
                    </button>
 
-                   {/* "See More" Button */}
                    {results.length > 1 && (
                        <button 
                             onClick={() => setShowAllResults(true)}
