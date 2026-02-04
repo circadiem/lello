@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { X, BookOpen, Trash2, House, Library, Gift, Plus, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, BookOpen, Trash2, House, Library, Gift, Plus, Clock, Tag } from 'lucide-react';
 
 // Strict Types Preserved
 interface DisplayItem {
@@ -14,6 +14,7 @@ interface DisplayItem {
   timestamp?: string;
   count?: number;
   ownershipStatus?: 'owned' | 'borrowed' | 'wishlist';
+  shelves?: string[]; // NEW: Added shelves support
 }
 
 interface HistoryItem {
@@ -22,7 +23,7 @@ interface HistoryItem {
   author: string;
   reader: string;
   timestamp: string;
-  notes?: string; // Added notes support
+  notes?: string;
 }
 
 interface BookDetailModalProps {
@@ -33,6 +34,7 @@ interface BookDetailModalProps {
   onRemove: (id: string | number) => void; 
   onDeleteAsset: (title: string) => void; 
   onToggleStatus: (id: string | number, status: 'owned' | 'borrowed' | 'wishlist') => void;
+  onUpdateShelves: (id: string | number, shelves: string[]) => void; // NEW: Callback
 }
 
 export default function BookDetailModal({ 
@@ -42,19 +44,41 @@ export default function BookDetailModal({
     onReadAgain, 
     onRemove, 
     onDeleteAsset, 
-    onToggleStatus 
+    onToggleStatus,
+    onUpdateShelves
 }: BookDetailModalProps) {
   
+  const [isAddingShelf, setIsAddingShelf] = useState(false);
+  const [newShelf, setNewShelf] = useState('');
+
   if (!book) return null;
 
   const coverImage = book.cover || book.cover_url;
+  const currentShelves = book.shelves || [];
 
-  // Preserved "Safe Delete" Logic
   const handleDeleteLibraryBook = () => {
       if (confirm(`Delete "${book.title}" from your Library entirely? This cannot be undone.`)) {
           onDeleteAsset(book.title);
           onClose();
       }
+  };
+
+  const handleAddShelf = () => {
+      if (!newShelf.trim()) {
+          setIsAddingShelf(false);
+          return;
+      }
+      const updated = [...currentShelves, newShelf.trim()];
+      // Remove duplicates
+      const unique = Array.from(new Set(updated));
+      onUpdateShelves(book.id, unique);
+      setNewShelf('');
+      setIsAddingShelf(false);
+  };
+
+  const handleRemoveShelf = (tagToRemove: string) => {
+      const updated = currentShelves.filter(s => s !== tagToRemove);
+      onUpdateShelves(book.id, updated);
   };
 
   return (
@@ -90,18 +114,15 @@ export default function BookDetailModal({
                 <p className="text-slate-500 font-medium">{book.author}</p>
             </div>
 
-            {/* NEW: Stats Grid with Ownership Toggle */}
-            <div className="grid grid-cols-2 gap-4 mb-8">
-                {/* Total Reads */}
+            {/* Stats Grid with Ownership Toggle */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center justify-center gap-1 text-center">
                     <span className="text-3xl font-extrabold text-slate-900">{book.count || history.length || 0}</span>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Reads</span>
                 </div>
 
-                {/* Ownership Toggle */}
                 <div className="p-2 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col justify-center">
                    <div className="flex bg-slate-200/50 p-1 rounded-2xl h-full relative">
-                        {/* OWNED BUTTON */}
                         <button 
                             onClick={() => onToggleStatus(book.id, 'owned')}
                             className={`flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all duration-300 ${book.ownershipStatus === 'owned' ? 'bg-white shadow-sm text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
@@ -109,8 +130,6 @@ export default function BookDetailModal({
                             <House size={18} strokeWidth={2.5} />
                             <span className="text-[9px] font-bold uppercase tracking-wider">Owned</span>
                         </button>
-                        
-                        {/* BORROWED BUTTON (Using Library Icon) */}
                         <button 
                             onClick={() => onToggleStatus(book.id, 'borrowed')}
                             className={`flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all duration-300 ${book.ownershipStatus === 'borrowed' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
@@ -122,7 +141,45 @@ export default function BookDetailModal({
                 </div>
             </div>
 
-            {/* NEW: Add to Registry (Visible only if Borrowed) */}
+            {/* NEW: Shelves Manager */}
+            <div className="mb-8">
+                <div className="flex items-center gap-2 mb-3 pl-1">
+                    <Tag size={12} className="text-slate-400" />
+                    <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">Shelves & Tags</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {currentShelves.map(tag => (
+                        <span key={tag} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border border-slate-200">
+                            {tag}
+                            <button onClick={() => handleRemoveShelf(tag)} className="hover:text-red-500 transition-colors">
+                                <X size={12} />
+                            </button>
+                        </span>
+                    ))}
+                    
+                    {isAddingShelf ? (
+                        <input 
+                            autoFocus
+                            type="text"
+                            placeholder="Tag name..."
+                            className="px-3 py-1.5 bg-white border-2 border-slate-900 rounded-lg text-xs font-bold text-slate-900 outline-none w-32"
+                            value={newShelf}
+                            onChange={(e) => setNewShelf(e.target.value)}
+                            onBlur={handleAddShelf}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddShelf()}
+                        />
+                    ) : (
+                        <button 
+                            onClick={() => setIsAddingShelf(true)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-50 text-slate-400 rounded-lg text-xs font-bold border border-dashed border-slate-300 hover:border-slate-400 hover:text-slate-600 transition-all"
+                        >
+                            <Plus size={12} /> Add Tag
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Registry Button */}
             {book.ownershipStatus === 'borrowed' && (
                 <button 
                     onClick={() => {
@@ -136,7 +193,7 @@ export default function BookDetailModal({
                 </button>
             )}
 
-            {/* Reading History List */}
+            {/* Reading History */}
             <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Reading History</h3>
             <div className="space-y-4">
                 {history.map((entry) => (
@@ -169,7 +226,7 @@ export default function BookDetailModal({
                 )}
             </div>
 
-            {/* Delete Book Logic */}
+            {/* Delete Book */}
             <div className="mt-12 pt-6 border-t border-slate-100 text-center">
                 <button onClick={handleDeleteLibraryBook} className="text-red-400 text-xs font-bold hover:text-red-600 transition-colors flex items-center justify-center gap-2 mx-auto">
                     <Trash2 size={14} /> Remove Book from Library
