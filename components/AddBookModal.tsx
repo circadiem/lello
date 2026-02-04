@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare } from 'lucide-react';
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Users } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
 
 export interface GoogleBook {
   id: string; 
@@ -10,6 +11,9 @@ export interface GoogleBook {
   coverUrl: string | null;
   description: string;
   pageCount: number;
+  source?: 'community' | 'google';
+  popularity?: number;
+  score?: number; // Internal scoring for sorting
 }
 
 interface AddBookModalProps {
@@ -31,6 +35,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   const [selectedReaders, setSelectedReaders] = useState<string[]>([activeReader]);
   const [logSession, setLogSession] = useState(true);
   const [note, setNote] = useState('');
+  const [showAllResults, setShowAllResults] = useState(false);
 
   // Initialize
   useEffect(() => {
@@ -46,6 +51,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         setError(null);
         setLogSession(true);
         setNote('');
+        setShowAllResults(false);
         if (activeReader && activeReader !== 'Parents') {
             setSelectedReaders([activeReader]);
         } else if (readers.length > 0) {
@@ -70,6 +76,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     setLoading(true);
     setError(null);
     setResults([]);
+    setShowAllResults(false); 
 
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_BOOKS_API_KEY;
 
@@ -80,63 +87,106 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
 
     try {
-      // Simple, robust fetch
-      const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=20&printType=books`);
-      
-      if (!response.ok) {
-          throw new Error(`Google API Error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.items) {
-        let formatted: GoogleBook[] = data.items
-            .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
-            .map((item: any) => ({
-                id: item.id,
-                title: item.volumeInfo.title,
-                author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
-                coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
-                description: item.volumeInfo.description || '',
-                pageCount: item.volumeInfo.pageCount || 0
+      // 1. RUN PARALLEL SEARCHES (Fail-Safe)
+      // We wrap DB search in a separate promise so it doesn't kill the Google search if it fails
+      const communityPromise = supabase.rpc('search_global_books', { keyword: searchTerm })
+        .then(({ data, error }) => {
+            if (error) throw error;
+            return (data || []).map((b: any, i: number) => ({
+                id: `lello-${i}`,
+                title: b.title,
+                author: b.author,
+                coverUrl: b.cover_url,
+                description: '',
+                pageCount: 0,
+                source: 'community' as const,
+                popularity: b.popularity
             }));
-
-        // Deduplicate
-        formatted = formatted.filter((book, index, self) => 
-            index === self.findIndex((t) => (
-                t.title === book.title && t.author === book.author
-            ))
-        );
-
-        // Smart Sort
-        formatted.sort((a, b) => {
-            const queryLower = searchTerm.toLowerCase();
-            const aTitle = a.title.toLowerCase();
-            const bTitle = b.title.toLowerCase();
-
-            // 1. Cover Priority
-            if (a.coverUrl && !b.coverUrl) return -1;
-            if (!a.coverUrl && b.coverUrl) return 1;
-
-            // 2. Exact Title Match
-            if (aTitle === queryLower && bTitle !== queryLower) return -1;
-            if (bTitle === queryLower && aTitle !== queryLower) return 1;
-
-            return 0;
+        })
+        .catch(err => {
+            console.warn("Community search skipped:", err);
+            return [];
         });
 
-        if (formatted.length > 0) setSelectedBook(formatted[0]); 
-        setResults(formatted);
-      } else {
-        setResults([]);
-      }
+      const googlePromise = fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=25&printType=books`)
+        .then(res => res.json())
+        .then(data => {
+            if (!data.items) return [];
+            return data.items
+                .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
+                .map((item: any) => ({
+                    id: item.id,
+                    title: item.volumeInfo.title,
+                    author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
+                    coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
+                    description: item.volumeInfo.description || '',
+                    pageCount: item.volumeInfo.pageCount || 0,
+                    source: 'google' as const,
+                    popularity: 0
+                }));
+        })
+        .catch(err => {
+            console.error("Google search failed:", err);
+            throw new Error("Search failed.");
+        });
+
+      // Wait for both (or just Google if DB fails)
+      const [communityBooks, googleBooks] = await Promise.all([communityPromise, googlePromise]);
+
+      // 2. MERGE & DEDUPLICATE
+      // We prioritize Community books. If Google finds the same book, we skip the Google version.
+      const combined = [...communityBooks];
+      
+      googleBooks.forEach((gBook: GoogleBook) => {
+          const isDuplicate = combined.some(cBook => 
+              normalize(cBook.title) === normalize(gBook.title) && 
+              normalize(cBook.author) === normalize(gBook.author)
+          );
+          if (!isDuplicate) combined.push(gBook);
+      });
+
+      // 3. THE SCORING ENGINE
+      const scored = combined.map(book => {
+          let score = 0;
+          const queryLower = searchTerm.toLowerCase();
+          const titleLower = book.title.toLowerCase();
+          const authorLower = book.author.toLowerCase();
+
+          // Rule A: Exact Title Match (+50)
+          if (titleLower === queryLower) score += 50;
+          
+          // Rule B: Has Cover (+40)
+          if (book.coverUrl) score += 40;
+
+          // Rule C: Community Verified (+30)
+          if (book.source === 'community') score += 30;
+
+          // Rule D: Author Match (+20)
+          if (authorLower.includes(queryLower)) score += 20;
+
+          // Rule E: Starts With Query (+10)
+          if (titleLower.startsWith(queryLower)) score += 10;
+
+          return { ...book, score };
+      });
+
+      // 4. SORT BY SCORE
+      scored.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+      // Auto-select the winner
+      if (scored.length > 0) setSelectedBook(scored[0]);
+      setResults(scored);
+
     } catch (err: any) {
       console.error(err);
-      setError(`Search failed: ${err.message}`);
+      setError(err.message || "Search failed.");
     } finally {
       setLoading(false);
     }
   };
+
+  // Helper to normalize strings for comparison (remove special chars, lowercase)
+  const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') searchBooks(query);
@@ -206,17 +256,64 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
         {/* Results Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 min-h-[200px]">
-           {results.map((book, i) => (
+           
+           {/* 1. Best Match View */}
+           {!showAllResults && results.length > 0 && (
+               <div className="animate-in fade-in zoom-in-95 duration-300">
+                   <div className="flex items-center gap-2 mb-3 pl-2">
+                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Top Match</p>
+                       {results[0].source === 'community' && (
+                           <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded-full flex items-center gap-1 shadow-sm border border-indigo-200">
+                               <Users size={10} /> Verified
+                           </span>
+                       )}
+                   </div>
+                   
+                   <button 
+                        onClick={() => setSelectedBook(results[0])}
+                        className="w-full p-4 rounded-[2rem] bg-white border-2 border-emerald-500 shadow-xl flex gap-5 text-left items-start relative overflow-hidden transition-transform active:scale-[0.98]"
+                   >
+                       <div className="w-24 h-36 shrink-0 bg-slate-200 rounded-xl overflow-hidden shadow-md flex items-center justify-center text-slate-400">
+                          {results[0].coverUrl ? <img src={results[0].coverUrl} className="w-full h-full object-cover" /> : <BookOpen size={32} />}
+                       </div>
+                       <div className="flex-1 min-w-0 py-2">
+                          <h3 className="text-xl font-extrabold text-slate-900 leading-tight mb-1 line-clamp-2">{results[0].title}</h3>
+                          <p className="text-sm font-medium text-slate-500 mb-4">{results[0].author}</p>
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold">
+                              <Check size={14} strokeWidth={3} />
+                              Selected
+                          </div>
+                       </div>
+                   </button>
+
+                   {/* "See More" Button */}
+                   {results.length > 1 && (
+                       <button 
+                            onClick={() => setShowAllResults(true)}
+                            className="w-full mt-6 py-3 text-slate-500 font-bold text-sm hover:bg-slate-100 rounded-xl flex items-center justify-center gap-2 transition-colors"
+                       >
+                           <span>Not the right book? See {results.length - 1} more</span>
+                           <ChevronDown size={16} />
+                       </button>
+                   )}
+               </div>
+           )}
+
+           {/* 2. List View (Expanded) */}
+           {showAllResults && results.map((book, i) => (
              <button 
                key={i} 
                onClick={() => setSelectedBook(book)}
-               className={`w-full p-3 rounded-[1.5rem] border flex items-center gap-4 text-left transition-all ${selectedBook?.title === book.title ? 'bg-emerald-50 border-emerald-500 shadow-md' : 'bg-white border-slate-100 shadow-sm hover:border-slate-300'}`}
+               className={`w-full p-3 rounded-[1.5rem] border flex items-center gap-4 text-left transition-all ${selectedBook?.title === book.title ? 'bg-emerald-50 border-emerald-500 shadow-md scale-[1.01]' : 'bg-white border-slate-100 shadow-sm hover:border-slate-300'}`}
              >
                <div className="w-12 h-16 shrink-0 bg-slate-200 rounded-xl overflow-hidden shadow-inner flex items-center justify-center text-slate-400">
                   {book.coverUrl ? <img src={book.coverUrl} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
                </div>
                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
+                    {book.source === 'community' && <Users size={12} className="text-indigo-500" />}
+                  </div>
                   <p className="text-xs text-slate-500 font-medium line-clamp-1">{book.author}</p>
                </div>
                {selectedBook?.title === book.title && <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white"><Check size={14} strokeWidth={4} /></div>}
@@ -230,6 +327,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
         {/* Footer */}
         <div className="p-6 bg-white border-t border-slate-100 space-y-4">
+          
           {selectedBook && (
               <div className="space-y-3 animate-in slide-in-from-bottom-2">
                   <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
