@@ -33,8 +33,8 @@ export async function POST(req: Request) {
     const ownedTitles = library?.map((b: any) => b.title) || [];
 
     // 2. Construct the Prompt
-    // UPDATED: Use 'gemini-2.0-flash' as 1.5 is deprecated
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    // UPDATED: Using 'gemini-3-flash', the current stable model as of Feb 2026.
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash" });
     
     const prompt = `
       Act as an expert children's librarian.
