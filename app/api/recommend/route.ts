@@ -16,14 +16,11 @@ export async function POST(req: Request) {
     if (!userId) return NextResponse.json({ error: 'User ID required' }, { status: 400 });
 
     // 1. Fetch Context: Heavy Rotation & Library
-    // We want to know what they LOVE (to find similar) and what they HAVE (to avoid dupes)
     const { data: logs } = await supabase.from('reading_logs').select('book_title, count').eq('user_id', userId);
     const { data: library } = await supabase.from('library').select('title').eq('user_id', userId);
 
-    // Aggregate logs to find "Heavy Rotation"
     const bookCounts: Record<string, number> = {};
     logs?.forEach((log: any) => {
-        // Handle cases where count might be pre-aggregated or individual rows
         const val = log.count || 1; 
         bookCounts[log.book_title] = (bookCounts[log.book_title] || 0) + val;
     });
@@ -36,7 +33,8 @@ export async function POST(req: Request) {
     const ownedTitles = library?.map((b: any) => b.title) || [];
 
     // 2. Construct the Prompt
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // UPDATED: Use 'gemini-2.0-flash' as 1.5 is deprecated
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     
     const prompt = `
       Act as an expert children's librarian.
@@ -59,8 +57,20 @@ export async function POST(req: Request) {
     // 3. Ask Gemini
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const cleanText = response.text().replace(/```json|```/g, '').trim();
-    const recommendations = JSON.parse(cleanText);
+    let text = response.text();
+
+    // Clean up markdown code blocks if present
+    text = text.replace(/```json|```/g, '').trim();
+    
+    // Improved Cleaning: Find the first '[' and the last ']'
+    const firstBracket = text.indexOf('[');
+    const lastBracket = text.lastIndexOf(']');
+    
+    if (firstBracket !== -1 && lastBracket !== -1) {
+        text = text.substring(firstBracket, lastBracket + 1);
+    }
+    
+    const recommendations = JSON.parse(text);
 
     return NextResponse.json({ success: true, recommendations });
 
