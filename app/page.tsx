@@ -5,7 +5,7 @@ import {
     ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
     BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
-    ShieldCheck, ArrowRight, Gift, Share2, Tag
+    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Mic
   } from 'lucide-react';  
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
@@ -26,7 +26,7 @@ interface Book {
   author: string;
   cover_url: string | null;
   ownership_status: 'owned' | 'borrowed' | 'wishlist';
-  shelves?: string[]; // Arrays of shelf names
+  shelves?: string[]; 
   created_at?: string;
 }
 
@@ -216,6 +216,62 @@ const LandingPage = () => {
     );
 };
 
+// --- MAGIC LOG MODAL (New Component) ---
+const MagicLogModal = ({ isOpen, onClose, onProcess }: { isOpen: boolean, onClose: () => void, onProcess: (text: string) => void }) => {
+    const [input, setInput] = useState('');
+    const [processing, setProcessing] = useState(false);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = async () => {
+        if (!input.trim()) return;
+        setProcessing(true);
+        await onProcess(input);
+        setProcessing(false);
+        setInput('');
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
+            <div className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-6 shadow-2xl animate-in slide-in-from-bottom-10 duration-300">
+                <div className="flex items-center gap-3 mb-4">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-lg">
+                        <Sparkles size={24} />
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-extrabold text-slate-900">Magic Log</h2>
+                        <p className="text-xs text-slate-500 font-bold">Powered by AI</p>
+                    </div>
+                </div>
+                
+                <p className="text-sm text-slate-500 mb-4 font-medium">
+                    Type or tap the <Mic size={12} className="inline text-slate-400" /> microphone on your keyboard to speak naturally.
+                    <br/><span className="text-slate-400 italic">"Leo read The Cat in the Hat and loved it."</span>
+                </p>
+
+                <textarea 
+                    autoFocus
+                    className="w-full h-32 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none mb-4"
+                    placeholder="Describe what was read..."
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                />
+
+                <button 
+                    disabled={processing || !input.trim()}
+                    onClick={handleSubmit}
+                    className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-70"
+                >
+                    {processing ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />}
+                    {processing ? 'Processing...' : 'Create Entry'}
+                </button>
+            </div>
+        </div>
+    );
+};
+
 // --- MAIN APP ---
 export default function Home() {
   const [session, setSession] = useState<any>(null);
@@ -242,6 +298,9 @@ export default function Home() {
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
   const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
+  
+  // NEW: Magic Log State
+  const [isMagicLogOpen, setMagicLogOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -307,6 +366,30 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
+  // NEW: Magic Log Handler
+  const handleMagicLogProcess = async (text: string) => {
+      try {
+          const res = await fetch('/api/magic-log', {
+              method: 'POST',
+              body: JSON.stringify({
+                  text,
+                  userId: session.user.id,
+                  readers: readers
+              })
+          });
+          const data = await res.json();
+          if (data.success) {
+              await fetchData(session.user.id);
+              // Optional: Provide feedback or vibration
+          } else {
+              alert("Could not process entry. Please try again.");
+          }
+      } catch (err) {
+          console.error(err);
+          alert("Connection error.");
+      }
+  };
+
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
     setAddModalOpen(false); 
     if (!session) return;
@@ -348,7 +431,6 @@ export default function Home() {
       }
   };
 
-  // NEW: Update Shelves Function
   const handleUpdateShelves = async (id: string | number, newShelves: string[]) => {
       if (!selectedBook) return; 
       const libBook = library.find(b => b.title === selectedBook.title);
@@ -617,7 +699,7 @@ export default function Home() {
                     reader: item.reader_name, 
                     notes: item.notes,
                     ownershipStatus: libBook ? libBook.ownership_status : 'wishlist',
-                    shelves: libBook ? libBook.shelves : [] // Pass shelves to history items too
+                    shelves: libBook ? libBook.shelves : [] 
                 };
             }
             aggregated[key].dailyCount += 1;
@@ -722,31 +804,37 @@ export default function Home() {
         {readers.length > 0 && activeReader === readers[readers.length-1] ? <ParentDashboard /> : (activeTab === 'library' ? <LibraryView /> : activeTab === 'home' ? <HomeView /> : <HistoryView />)}
       </main>
       {readers.length > 0 && activeReader !== readers[readers.length-1] && (<nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]"><button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button></nav>)}
-      {readers.length > 0 && activeReader !== readers[readers.length-1] && (<div className="fixed bottom-24 left-0 right-0 flex justify-center z-40 pointer-events-none"><button onClick={() => setAddModalOpen(true)} className="pointer-events-auto bg-slate-900 text-slate-50 px-10 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"><Plus size={20} strokeWidth={3} /><span>Add</span></button></div>)}
+      {readers.length > 0 && activeReader !== readers[readers.length-1] && (
+        <div className="fixed bottom-24 left-0 right-0 flex justify-center items-center gap-4 z-40 pointer-events-none">
+            {/* Standard Add Button */}
+            <button 
+                onClick={() => setAddModalOpen(true)} 
+                className="pointer-events-auto bg-slate-900 text-slate-50 px-8 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"
+            >
+                <Plus size={20} strokeWidth={3} />
+                <span>Add</span>
+            </button>
+            
+            {/* Magic Log Button */}
+            <button 
+                onClick={() => setMagicLogOpen(true)}
+                className="pointer-events-auto w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform hover:shadow-indigo-500/25"
+            >
+                <Sparkles size={24} />
+            </button>
+        </div>
+      )}
     </div>
     
-    <AddBookModal 
-        isOpen={isAddModalOpen} 
-        onClose={() => setAddModalOpen(false)} 
-        onAdd={handleAddBook} 
-        readers={readers.slice(0, -1)} 
-        activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader}
-        initialQuery={''} 
-    />
-    <BookDetailModal 
-        book={selectedBook as any} 
-        history={selectedBookHistory} 
-        onClose={() => setSelectedBook(null)} 
-        onReadAgain={handleReadAgain} 
-        onRemove={handleRemoveBook} 
-        onDeleteAsset={handleDeleteAsset} 
-        onToggleStatus={handleToggleStatus}
-        onUpdateShelves={handleUpdateShelves}
-    />
+    <AddBookModal isOpen={isAddModalOpen} onClose={() => setAddModalOpen(false)} onAdd={handleAddBook} readers={readers.slice(0, -1)} activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader} initialQuery={''} />
+    <BookDetailModal book={selectedBook as any} history={selectedBookHistory} onClose={() => setSelectedBook(null)} onReadAgain={handleReadAgain} onRemove={handleRemoveBook} onDeleteAsset={handleDeleteAsset} onToggleStatus={handleToggleStatus} onUpdateShelves={handleUpdateShelves} />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
     <AvatarModal isOpen={isAvatarModalOpen} onClose={() => setAvatarModalOpen(false)} onSave={handleSaveAvatar} currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null} name={editingAvatarFor || ''} />
+    
+    {/* NEW: Magic Log Modal */}
+    <MagicLogModal isOpen={isMagicLogOpen} onClose={() => setMagicLogOpen(false)} onProcess={handleMagicLogProcess} />
     </>
   );
 };

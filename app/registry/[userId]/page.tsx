@@ -1,10 +1,14 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, use } from 'react'; // Added 'use' import
 import { supabase } from '@/lib/supabaseClient';
 import { Gift, Check, ExternalLink, BookOpen, User, ShoppingBag } from 'lucide-react';
 
-export default function RegistryPage({ params }: { params: { userId: string } }) {
+// FIX: Params is now a Promise in Next.js 15
+export default function RegistryPage({ params }: { params: Promise<{ userId: string }> }) {
+  // FIX: Unwrap the params using React.use()
+  const { userId } = use(params);
+
   const [profile, setProfile] = useState<any>(null);
   const [books, setBooks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -13,15 +17,17 @@ export default function RegistryPage({ params }: { params: { userId: string } })
   const [claiming, setClaiming] = useState(false);
 
   useEffect(() => {
-    fetchRegistry();
-  }, []);
+    if (userId) {
+        fetchRegistry(userId);
+    }
+  }, [userId]);
 
-  const fetchRegistry = async () => {
+  const fetchRegistry = async (id: string) => {
     // 1. Get Profile Name
     const { data: profileData } = await supabase
       .from('profiles')
       .select('readers')
-      .eq('id', params.userId)
+      .eq('id', id)
       .single();
     
     setProfile(profileData);
@@ -30,9 +36,9 @@ export default function RegistryPage({ params }: { params: { userId: string } })
     const { data: bookData } = await supabase
       .from('library')
       .select('*')
-      .eq('user_id', params.userId)
+      .eq('user_id', id)
       .eq('ownership_status', 'wishlist')
-      .is('purchased_at', null) // Only show unbought books
+      .is('purchased_at', null) 
       .order('created_at', { ascending: false });
 
     if (bookData) setBooks(bookData);
@@ -41,7 +47,7 @@ export default function RegistryPage({ params }: { params: { userId: string } })
 
   const handleIntercept = (book: any) => {
     setSelectedBook(book);
-    setGiverName(''); // Reset name
+    setGiverName(''); 
   };
 
   const executePurchase = async () => {
@@ -61,20 +67,17 @@ export default function RegistryPage({ params }: { params: { userId: string } })
     setBooks(prev => prev.filter(b => b.id !== selectedBook.id));
 
     // 3. Redirect to Amazon Search
-    // Bulletproof Search: "Title + Author"
     const query = `${selectedBook.title} ${selectedBook.author}`;
     const url = `https://www.amazon.com/s?k=${encodeURIComponent(query)}&i=stripbooks`;
     
     window.open(url, '_blank');
     
-    // 4. Close Modal
     setClaiming(false);
     setSelectedBook(null);
   };
 
   if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4"><div className="animate-pulse flex flex-col items-center gap-4"><div className="w-12 h-12 bg-slate-200 rounded-full"></div><div className="h-4 w-32 bg-slate-200 rounded"></div></div></div>;
 
-  // Derive display name (e.g. "Leo & Maya's Registry")
   const displayName = profile?.readers 
     ? profile.readers.filter((r: string) => r !== 'Parents').join(' & ') 
     : 'Child';
@@ -109,7 +112,6 @@ export default function RegistryPage({ params }: { params: { userId: string } })
             books.map(book => (
                 <div key={book.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-4">
                     <div className="flex gap-5">
-                        {/* Cover / Placeholder */}
                         <div className="w-20 h-28 bg-slate-100 rounded-xl shrink-0 flex items-center justify-center text-slate-300 overflow-hidden border border-slate-50 relative">
                             {book.cover_url ? (
                                 <img src={book.cover_url} className="w-full h-full object-cover" />
@@ -118,12 +120,10 @@ export default function RegistryPage({ params }: { params: { userId: string } })
                             )}
                         </div>
                         
-                        {/* Details */}
                         <div className="flex-1 min-w-0 py-1">
                             <h3 className="font-extrabold text-lg text-slate-900 leading-tight mb-1 line-clamp-2">{book.title}</h3>
                             <p className="text-sm font-medium text-slate-500 mb-3">{book.author}</p>
                             
-                            {/* Shelf Tags (if any) */}
                             {book.shelves && book.shelves.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mb-2">
                                     {book.shelves.slice(0, 2).map((tag: string) => (
@@ -136,7 +136,6 @@ export default function RegistryPage({ params }: { params: { userId: string } })
                         </div>
                     </div>
 
-                    {/* Action Button */}
                     <button 
                         onClick={() => handleIntercept(book)}
                         className="w-full py-3.5 bg-slate-900 text-white font-bold rounded-xl shadow-lg shadow-slate-900/10 flex items-center justify-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"
@@ -149,12 +148,10 @@ export default function RegistryPage({ params }: { params: { userId: string } })
         )}
       </main>
 
-      {/* The Intercept Modal */}
       {selectedBook && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 sm:p-4">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setSelectedBook(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-10 duration-300">
-                
                 <div className="text-center mb-6">
                     <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
                         <Gift size={28} />

@@ -14,7 +14,7 @@ export interface GoogleBook {
   source?: 'community' | 'google';
   popularity?: number;
   score?: number; 
-  originalIndex?: number; // Added for tie-breaking
+  originalIndex?: number;
 }
 
 interface AddBookModalProps {
@@ -70,6 +70,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
       return () => clearTimeout(delayDebounceFn);
   }, [query, initialQuery]);
 
+  // --- THE FIX: Explicit Async Functions for Parallel Searching ---
   const searchBooks = async (searchTerm: string) => {
     if (!searchTerm || searchTerm.length < 2) return;
     setLoading(true);
@@ -85,12 +86,12 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         return;
     }
 
-    try {
-      // 1. RUN PARALLEL SEARCHES
-      const communityPromise = (async () => {
-          try {
+    // 1. Define Community Search (Safe Wrapper)
+    const fetchCommunityBooks = async (): Promise<GoogleBook[]> => {
+        try {
             const { data, error } = await supabase.rpc('search_global_books', { keyword: searchTerm });
             if (error) throw error;
+            
             return (data || []).map((b: any, i: number) => ({
                 id: `lello-${i}`,
                 title: b.title,
@@ -101,16 +102,20 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 source: 'community' as const,
                 popularity: b.popularity
             }));
-          } catch (err) {
+        } catch (err) {
             console.warn("Community search skipped:", err);
-            return [];
-          }
-      })();
+            return []; // Fail silently, return empty array
+        }
+    };
 
-      const googlePromise = fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=30&printType=books`)
-        .then(res => res.json())
-        .then(data => {
+    // 2. Define Google Search (Safe Wrapper)
+    const fetchGoogleBooks = async (): Promise<GoogleBook[]> => {
+        try {
+            const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=30&printType=books`);
+            const data = await res.json();
+            
             if (!data.items) return [];
+            
             return data.items
                 .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
                 .map((item: any) => ({
@@ -123,18 +128,23 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                     source: 'google' as const,
                     popularity: 0
                 }));
-        })
-        .catch(err => {
+        } catch (err) {
             console.error("Google search failed:", err);
-            throw new Error("Search failed.");
-        });
+            return []; // Fail silently, return empty array
+        }
+    };
 
-      const [communityBooks, googleBooks] = await Promise.all([communityPromise, googlePromise]);
+    try {
+      // 3. Run both in parallel
+      const [communityBooks, googleBooks] = await Promise.all([
+          fetchCommunityBooks(), 
+          fetchGoogleBooks()
+      ]);
 
-      // 2. MERGE & DEDUPLICATE
+      // 4. MERGE & DEDUPLICATE
       const combined = [...communityBooks];
       
-      googleBooks.forEach((gBook: GoogleBook) => {
+      googleBooks.forEach((gBook) => {
           const isDuplicate = combined.some(cBook => 
               normalize(cBook.title) === normalize(gBook.title) && 
               normalize(cBook.author) === normalize(gBook.author)
@@ -142,42 +152,27 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           if (!isDuplicate) combined.push(gBook);
       });
 
-      // 3. THE IMPROVED SCORING ENGINE
+      // 5. SCORING ENGINE
       const scored = combined.map((book, index) => {
           let score = 0;
           const queryNorm = normalize(searchTerm);
           const titleNorm = normalize(book.title);
           const authorNorm = normalize(book.author);
 
-          // Rule A: EXACT AUTHOR MATCH (+60)
-          // "Dr. Seuss" query -> "Dr. Seuss" author
-          if (authorNorm === queryNorm) score += 60;
-
-          // Rule B: EXACT TITLE MATCH (+50)
-          // "The Lorax" query -> "The Lorax" title
-          else if (titleNorm === queryNorm) score += 50;
-
-          // Rule C: HAS COVER (+40)
+          if (authorNorm === queryNorm) score += 60; // Exact Author
+          else if (titleNorm === queryNorm) score += 50; // Exact Title
           if (book.coverUrl) score += 40;
-
-          // Rule D: COMMUNITY VERIFIED (+30)
           if (book.source === 'community') score += 30;
-
-          // Rule E: PARTIAL AUTHOR MATCH (+20)
           if (authorNorm.includes(queryNorm) && authorNorm !== queryNorm) score += 20;
-
-          // Rule F: STARTS WITH QUERY (+10)
           if (titleNorm.startsWith(queryNorm)) score += 10;
 
-          // Store original index to use as tie-breaker (Google's popularity rank)
           return { ...book, score, originalIndex: index };
       });
 
-      // 4. SORT BY SCORE, THEN BY ORIGINAL GOOGLE RANK
+      // Sort by score, then by original Google rank
       scored.sort((a, b) => {
           const scoreDiff = (b.score || 0) - (a.score || 0);
           if (scoreDiff !== 0) return scoreDiff;
-          // If scores are tied (e.g. 5 Oliver Jeffers books), let the Google order decide
           return (a.originalIndex || 0) - (b.originalIndex || 0);
       });
 
@@ -192,7 +187,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
     }
   };
 
-  // Helper: "Dr. Seuss" -> "drseuss"
   const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
