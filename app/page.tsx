@@ -63,7 +63,7 @@ interface DisplayItem {
   dailyCount?: number;
 }
 
-// --- HELPERS ---
+// --- HELPERS (Outside Component) ---
 const isToday = (isoString?: string) => {
     if (!isoString) return false;
     const date = new Date(isoString);
@@ -109,48 +109,11 @@ const getLastName = (fullName: string) => {
     return parts.length > 0 ? parts[parts.length - 1] : fullName;
 };
 
+// Fixed Avatar Helper (Prevents crash on empty name)
 const getAvatarUrl = (name: string, map: Record<string, string>) => {
-    if (!name) return ''; 
+    if (!name) return 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'; 
     if (map[name]) return `/avatars/${map[name]}`;
     return `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`;
-};
-
-// --- COMPONENTS ---
-const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: boolean }[] }) => {
-    const max = Math.max(...data.map(d => d.count), 4); 
-    return (
-        <div className="w-full h-56 bg-slate-900 rounded-[2.5rem] p-6 flex flex-col justify-between shadow-xl mb-8 overflow-hidden">
-            <div className="flex justify-between items-start mb-4">
-                <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">This Week</p>
-                    <p className="text-white font-bold text-xl">Weekly Count</p>
-                </div>
-                <div className="p-2 bg-slate-800 rounded-full text-emerald-400">
-                    <BarChart3 size={20} />
-                </div>
-            </div>
-            <div className="flex items-end justify-between gap-2 h-full pb-2 px-2">
-                {data.map((item, i) => (
-                    <div key={i} className="flex flex-col items-center gap-2 flex-1">
-                        <div className="w-full relative group flex items-end justify-center h-24">
-                            <div 
-                                style={{ height: `${(item.count / max) * 100}%` }} 
-                                className={`w-full max-w-[12px] rounded-full transition-all duration-500 min-h-[4px] ${item.isToday ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]' : 'bg-slate-700 group-hover:bg-slate-600'}`} 
-                            />
-                            {item.count > 0 && (
-                                <div className="absolute -top-8 bg-white text-slate-900 text-[10px] font-bold px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-md">
-                                    {item.count}
-                                </div>
-                            )}
-                        </div>
-                        <span className={`text-[9px] font-bold uppercase tracking-wider ${item.isToday ? 'text-white' : 'text-slate-500'}`}>
-                            {item.day}
-                        </span>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
 };
 
 const LandingPage = () => {
@@ -223,6 +186,43 @@ const LandingPage = () => {
     );
 };
 
+const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: boolean }[] }) => {
+    const max = Math.max(...data.map(d => d.count), 4); 
+    return (
+        <div className="w-full h-56 bg-slate-900 rounded-[2.5rem] p-6 flex flex-col justify-between shadow-xl mb-8 overflow-hidden">
+            <div className="flex justify-between items-start mb-4">
+                <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">This Week</p>
+                    <p className="text-white font-bold text-xl">Weekly Count</p>
+                </div>
+                <div className="p-2 bg-slate-800 rounded-full text-emerald-400">
+                    <BarChart3 size={20} />
+                </div>
+            </div>
+            <div className="flex items-end justify-between gap-2 h-full pb-2 px-2">
+                {data.map((item, i) => (
+                    <div key={i} className="flex flex-col items-center gap-2 flex-1">
+                        <div className="w-full relative group flex items-end justify-center h-24">
+                            <div 
+                                style={{ height: `${(item.count / max) * 100}%` }} 
+                                className={`w-full max-w-[12px] rounded-full transition-all duration-500 min-h-[4px] ${item.isToday ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]' : 'bg-slate-700 group-hover:bg-slate-600'}`} 
+                            />
+                            {item.count > 0 && (
+                                <div className="absolute -top-8 bg-white text-slate-900 text-[10px] font-bold px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-md">
+                                    {item.count}
+                                </div>
+                            )}
+                        </div>
+                        <span className={`text-[9px] font-bold uppercase tracking-wider ${item.isToday ? 'text-white' : 'text-slate-500'}`}>
+                            {item.day}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 // --- MAIN APP ---
 export default function Home() {
   // Global State
@@ -241,7 +241,7 @@ export default function Home() {
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
-  // UI State (Hoisted from Sub-components)
+  // UI State
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('owned'); 
   const [copied, setCopied] = useState(false);
@@ -286,7 +286,9 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
-  // --- Derived Data (Hoisted) ---
+  // --- Derived Data & Helpers (MOVED UP) ---
+  const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
+
   const stats = useMemo(() => {
     const readerLog = logs.filter(item => item.reader_name === activeReader);
     const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
@@ -482,8 +484,6 @@ export default function Home() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
   };
-
-  const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
   const selectedBookHistory = useMemo(() => { 
       if (!selectedBook) return []; 
@@ -759,7 +759,12 @@ export default function Home() {
         <div className="flex items-center gap-3">
             <div className="relative">
                 <button onClick={() => setShowReaderMenu(!showReaderMenu)} className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm ring-1 ring-slate-200 active:scale-90 transition-transform">
-                    <img src={getAvatarUrl(activeReader, readerAvatars)} className="w-full h-full object-cover bg-orange-100" />
+                    {/* Fixed Avatar Crash by using safe helper */}
+                    <img 
+                        src={getAvatarUrl(activeReader, readerAvatars)} 
+                        className="w-full h-full object-cover bg-orange-100" 
+                        alt="Reader Avatar"
+                    />
                 </button>
                 {showReaderMenu && (
                 <>

@@ -15,7 +15,7 @@ export async function POST(req: Request) {
 
     if (!userId) return NextResponse.json({ error: 'User ID required' }, { status: 400 });
 
-    // 1. Fetch Context: Heavy Rotation & Library
+    // 1. Fetch Context
     const { data: logs } = await supabase.from('reading_logs').select('book_title, count').eq('user_id', userId);
     const { data: library } = await supabase.from('library').select('title').eq('user_id', userId);
 
@@ -32,9 +32,12 @@ export async function POST(req: Request) {
 
     const ownedTitles = library?.map((b: any) => b.title) || [];
 
-    // 2. Construct the Prompt
-    // UPDATED: Using 'gemini-2.5-flash-lite', the cost-effective workhorse.
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+    // 2. Construct Prompt (Using your preferred model)
+    // We explicitly request 'application/json' to help the model format correctly
+    const model = genAI.getGenerativeModel({ 
+        model: "gemini-2.5-flash-lite",
+        generationConfig: { responseMimeType: "application/json" } 
+    });
     
     const prompt = `
       Act as an expert children's librarian.
@@ -46,7 +49,7 @@ export async function POST(req: Request) {
       
       Task:
       Recommend exactly 5 books (unless the user asked for a specific number).
-      For each book, provide a title, author, and a SHORT, custom "reason" blurb explaining why it fits their Heavy Rotation or specific request.
+      For each book, provide a title, author, and a SHORT, custom "reason" blurb explaining why it fits.
       
       Return JSON ONLY:
       [
@@ -54,23 +57,22 @@ export async function POST(req: Request) {
       ]
     `;
 
-    // 3. Ask Gemini
+    // 3. Execute & Parse
     const result = await model.generateContent(prompt);
     const response = await result.response;
     let text = response.text();
 
-    // Clean up markdown code blocks if present
-    text = text.replace(/```json|```/g, '').trim();
+    // Aggressive Cleanup: Remove markdown blocks if they exist
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
     
-    // Improved Cleaning: Find the first '[' and the last ']'
-    const firstBracket = text.indexOf('[');
-    const lastBracket = text.lastIndexOf(']');
-    
-    if (firstBracket !== -1 && lastBracket !== -1) {
-        text = text.substring(firstBracket, lastBracket + 1);
+    // Safety Parser
+    let recommendations;
+    try {
+        recommendations = JSON.parse(text);
+    } catch (e) {
+        console.error("JSON Parse Failed:", text);
+        throw new Error("The Librarian returned invalid data. Please try again.");
     }
-    
-    const recommendations = JSON.parse(text);
 
     return NextResponse.json({ success: true, recommendations });
 
