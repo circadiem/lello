@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Users } from 'lucide-react';
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Users, Star } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 
 export interface GoogleBook {
@@ -12,9 +12,9 @@ export interface GoogleBook {
   description: string;
   pageCount: number;
   source?: 'community' | 'google';
-  popularity?: number;
-  score?: number; 
-  originalIndex?: number;
+  popularity?: number; // ratingsCount
+  rating?: number;     // averageRating
+  publishedDate?: string;
 }
 
 interface AddBookModalProps {
@@ -70,7 +70,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
       return () => clearTimeout(delayDebounceFn);
   }, [query, initialQuery]);
 
-  // --- THE FIX: Explicit Async Functions for Parallel Searching ---
   const searchBooks = async (searchTerm: string) => {
     if (!searchTerm || searchTerm.length < 2) return;
     setLoading(true);
@@ -86,7 +85,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         return;
     }
 
-    // 1. Define Community Search (Safe Wrapper)
+    // 1. Community Search (Lello Database)
     const fetchCommunityBooks = async (): Promise<GoogleBook[]> => {
         try {
             const { data, error } = await supabase.rpc('search_global_books', { keyword: searchTerm });
@@ -100,48 +99,62 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 description: '',
                 pageCount: 0,
                 source: 'community' as const,
-                popularity: b.popularity
+                popularity: b.popularity || 0,
+                rating: 0
             }));
         } catch (err) {
             console.warn("Community search skipped:", err);
-            return []; // Fail silently, return empty array
+            return [];
         }
     };
 
-    // 2. Define Google Search (Safe Wrapper)
+    // 2. Google Books Search (Strict Mode)
     const fetchGoogleBooks = async (): Promise<GoogleBook[]> => {
         try {
-            const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=30&printType=books`);
+            // Request 40 results to ensure we have enough after filtering
+            const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchTerm)}&key=${apiKey}&maxResults=40&printType=books`);
             const data = await res.json();
             
             if (!data.items) return [];
             
+            // STRICT FILTERING PIPELINE
             return data.items
-                .filter((item: any) => item.volumeInfo.maturityRating !== 'MATURE')
+                .filter((item: any) => {
+                    const info = item.volumeInfo;
+                    // Rule 1: Must have a thumbnail
+                    if (!info.imageLinks?.thumbnail) return false;
+                    // Rule 2: Must not be "MATURE"
+                    if (info.maturityRating === 'MATURE') return false;
+                    // Rule 3: Must have a title and author
+                    if (!info.title || !info.authors) return false;
+                    return true;
+                })
                 .map((item: any) => ({
                     id: item.id,
                     title: item.volumeInfo.title,
-                    author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown Author',
-                    coverUrl: item.volumeInfo.imageLinks?.thumbnail?.replace('http:', 'https:') || null,
+                    author: item.volumeInfo.authors ? item.volumeInfo.authors[0] : 'Unknown',
+                    coverUrl: item.volumeInfo.imageLinks.thumbnail.replace('http:', 'https:'),
                     description: item.volumeInfo.description || '',
                     pageCount: item.volumeInfo.pageCount || 0,
                     source: 'google' as const,
-                    popularity: 0
+                    // Capture popularity metrics for sorting
+                    popularity: item.volumeInfo.ratingsCount || 0,
+                    rating: item.volumeInfo.averageRating || 0,
+                    publishedDate: item.volumeInfo.publishedDate
                 }));
         } catch (err) {
             console.error("Google search failed:", err);
-            return []; // Fail silently, return empty array
+            return [];
         }
     };
 
     try {
-      // 3. Run both in parallel
       const [communityBooks, googleBooks] = await Promise.all([
           fetchCommunityBooks(), 
           fetchGoogleBooks()
       ]);
 
-      // 4. MERGE & DEDUPLICATE
+      // 3. MERGE & DEDUPLICATE
       const combined = [...communityBooks];
       
       googleBooks.forEach((gBook) => {
@@ -152,28 +165,36 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
           if (!isDuplicate) combined.push(gBook);
       });
 
-      // 5. SCORING ENGINE
-      const scored = combined.map((book, index) => {
+      // 4. INTELLIGENT RANKING ENGINE
+      // We score books to push "Dr. Seuss" classics above "Dr. Seuss Activity Book"
+      const scored = combined.map((book) => {
           let score = 0;
           const queryNorm = normalize(searchTerm);
           const titleNorm = normalize(book.title);
           const authorNorm = normalize(book.author);
 
-          if (authorNorm === queryNorm) score += 60; // Exact Author
-          else if (titleNorm === queryNorm) score += 50; // Exact Title
-          if (book.coverUrl) score += 40;
-          if (book.source === 'community') score += 30;
-          if (authorNorm.includes(queryNorm) && authorNorm !== queryNorm) score += 20;
-          if (titleNorm.startsWith(queryNorm)) score += 10;
+          // A. Relevance
+          if (titleNorm === queryNorm) score += 100; // Exact Title Match
+          else if (titleNorm.startsWith(queryNorm)) score += 50;
+          
+          if (authorNorm === queryNorm) score += 60; // Exact Author Match
 
-          return { ...book, score, originalIndex: index };
+          // B. Popularity (The "Caps for Sale" Fix)
+          // If the book has many ratings, it's likely the "real" book, not an obscure edition.
+          if ((book.popularity || 0) > 1000) score += 40;
+          else if ((book.popularity || 0) > 100) score += 20;
+          
+          // C. Community Bonus
+          if (book.source === 'community') score += 10;
+
+          return { ...book, score };
       });
 
-      // Sort by score, then by original Google rank
+      // Sort by calculated Score DESC, then by Ratings Count DESC
       scored.sort((a, b) => {
-          const scoreDiff = (b.score || 0) - (a.score || 0);
+          const scoreDiff = b.score - a.score;
           if (scoreDiff !== 0) return scoreDiff;
-          return (a.originalIndex || 0) - (b.originalIndex || 0);
+          return (b.popularity || 0) - (a.popularity || 0);
       });
 
       if (scored.length > 0) setSelectedBook(scored[0]);
@@ -263,11 +284,11 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                <div className="animate-in fade-in zoom-in-95 duration-300">
                    <div className="flex items-center gap-2 mb-3 pl-2">
                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Top Match</p>
-                       {results[0].source === 'community' && (
-                           <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded-full flex items-center gap-1 shadow-sm border border-indigo-200">
-                               <Users size={10} /> Verified
+                       {results[0].popularity ? (
+                           <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full flex items-center gap-1 shadow-sm border border-amber-200">
+                               <Star size={10} fill="currentColor" /> Popular
                            </span>
-                       )}
+                       ) : null}
                    </div>
                    
                    <button 
@@ -312,7 +333,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
-                    {book.source === 'community' && <Users size={12} className="text-indigo-500" />}
+                    {book.popularity && book.popularity > 500 && <Star size={10} className="text-amber-500 fill-amber-500" />}
                   </div>
                   <p className="text-xs text-slate-500 font-medium line-clamp-1">{book.author}</p>
                </div>

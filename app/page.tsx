@@ -5,7 +5,7 @@ import {
     ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
     BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
-    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles
+    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star
   } from 'lucide-react';  
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
@@ -14,7 +14,7 @@ import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
 import AvatarModal from '@/components/AvatarModal';
 import OnboardingWizard from '@/components/OnboardingWizard'; 
-import DiscoverModal from '@/components/DiscoverModal'; // NEW: Import the AI Librarian
+import DiscoverModal from '@/components/DiscoverModal'; 
 import { supabase } from '@/lib/supabaseClient';
 
 // --- TYPES ---
@@ -26,7 +26,10 @@ interface Book {
   title: string;
   author: string;
   cover_url: string | null;
-  ownership_status: 'owned' | 'borrowed' | 'wishlist';
+  ownership_status: 'owned' | 'borrowed'; 
+  in_wishlist: boolean;                   
+  rating: number;                         
+  memo: string | null;                    
   shelves?: string[]; 
   created_at?: string;
 }
@@ -51,8 +54,11 @@ interface DisplayItem {
   reader?: string;
   timestamp?: string;
   count?: number;
+  // UI Props
+  ownershipStatus?: 'owned' | 'borrowed';
+  inWishlist?: boolean;
   rating?: number;
-  ownershipStatus?: 'owned' | 'borrowed' | 'wishlist';
+  memo?: string;
   shelves?: string[];
   dailyCount?: number;
 }
@@ -219,6 +225,7 @@ const LandingPage = () => {
 
 // --- MAIN APP ---
 export default function Home() {
+  // Global State
   const [session, setSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -234,6 +241,12 @@ export default function Home() {
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
+  // UI State (Hoisted from Sub-components)
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('owned'); 
+  const [copied, setCopied] = useState(false);
+
+  // Modals
   const [isAddModalOpen, setAddModalOpen] = useState(false);
   const [selectedBook, setSelectedBook] = useState<DisplayItem | null>(null);
   const [isGoalModalOpen, setGoalModalOpen] = useState(false);
@@ -243,8 +256,6 @@ export default function Home() {
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
   const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
-  
-  // NEW: Discover State
   const [isDiscoverOpen, setDiscoverOpen] = useState(false);
 
   useEffect(() => {
@@ -275,6 +286,7 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
+  // --- Derived Data (Hoisted) ---
   const stats = useMemo(() => {
     const readerLog = logs.filter(item => item.reader_name === activeReader);
     const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
@@ -283,6 +295,68 @@ export default function Home() {
     return { dailyCount, weeklyCount, readerLog, goals: currentGoals };
   }, [logs, activeReader, readerGoals]);
 
+  const uniqueShelves = useMemo(() => {
+      const shelves = new Set<string>();
+      library.forEach(book => {
+          if (book.shelves) book.shelves.forEach(s => shelves.add(s));
+      });
+      return Array.from(shelves).sort();
+  }, [library]);
+
+  const chartData = useMemo(() => {
+      const days = [];
+      const now = new Date();
+      const currentDay = now.getDay(); 
+      const diff = currentDay === 0 ? 6 : currentDay - 1; 
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - diff);
+      for (let i = 0; i < 7; i++) {
+          const d = new Date(monday);
+          d.setDate(monday.getDate() + i);
+          const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
+          let count = 0;
+          if (d <= now) {
+              count = logs.filter(item => { const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length;
+          }
+          days.push({ day: dayName, count, isToday: d.getDate() === now.getDate() && d.getMonth() === now.getMonth() }); 
+      } 
+      return days; 
+  }, [logs, activeReader]);
+
+  const groupedHistory = useMemo(() => { 
+      const groups: { today: any[], yesterday: any[], week: any[], older: any[] } = { today: [], yesterday: [], week: [], older: [] };
+      const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      const aggregated: Record<string, any> = {};
+      sortedLog.forEach(item => {
+          const dateKey = new Date(item.timestamp).toLocaleDateString();
+          const key = `${dateKey}-${item.book_title}`;
+          if (!aggregated[key]) {
+              const libBook = library.find(b => b.title === item.book_title && b.author === item.book_author);
+              aggregated[key] = { 
+                  id: item.id, 
+                  title: item.book_title, 
+                  author: item.book_author, 
+                  cover: getBookCover(item.book_title), 
+                  dailyCount: 0, 
+                  timestamp: item.timestamp, 
+                  reader: item.reader_name, 
+                  notes: item.notes,
+                  ownershipStatus: libBook ? libBook.ownership_status : 'wishlist',
+                  shelves: libBook ? libBook.shelves : [] 
+              };
+          }
+          aggregated[key].dailyCount += 1;
+      });
+      Object.values(aggregated).forEach((item: any) => {
+          if (isToday(item.timestamp)) groups.today.push(item);
+          else if (isYesterday(item.timestamp)) groups.yesterday.push(item);
+          else if (isEarlierThisWeek(item.timestamp)) groups.week.push(item);
+          else groups.older.push(item);
+      });
+      return groups;
+  }, [stats.readerLog, library]);
+
+  // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {
       setShowReaderMenu(false);
       const isParent = readers.length > 0 && name === readers[readers.length - 1];
@@ -316,8 +390,16 @@ export default function Home() {
     if (!session) return;
     const existingBook = library.find(b => b.title === book.title && b.author === book.author);
     if (!existingBook) { 
+        const isWishlist = status === 'wishlist';
         const { data: newBook } = await supabase.from('library').insert({ 
-            user_id: session.user.id, title: book.title, author: book.author, cover_url: book.coverUrl, ownership_status: status 
+            user_id: session.user.id, 
+            title: book.title, 
+            author: book.author, 
+            cover_url: book.coverUrl, 
+            ownership_status: isWishlist ? 'owned' : status, 
+            in_wishlist: isWishlist,
+            rating: 0,
+            memo: ''
         }).select().single();
         if (newBook) setLibrary(prev => [...prev, newBook as Book]); 
     }
@@ -332,7 +414,7 @@ export default function Home() {
         const castLogs = insertedLogs as ReadingLog[]; 
         setLogs(prev => [...castLogs, ...prev]); 
         setSelectedBook({ 
-            id: castLogs[0].id, title: book.title, author: book.author, cover: book.coverUrl || undefined, reader: castLogs[0].reader_name, timestamp: castLogs[0].timestamp, ownershipStatus: 'owned'
+            id: castLogs[0].id, title: book.title, author: book.author, cover: book.coverUrl || undefined, reader: castLogs[0].reader_name, timestamp: castLogs[0].timestamp, ownershipStatus: 'owned', inWishlist: false, rating: 0, memo: ''
         }); 
     }
   };
@@ -342,14 +424,28 @@ export default function Home() {
   const handleRemoveBook = async (id: number | string) => { await supabase.from('reading_logs').delete().eq('id', id); setLogs(prev => prev.filter(i => i.id !== id)); setSelectedBook(null); };
   const handleDeleteAsset = async (title: string) => { if (!session) return; await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id); setLibrary(prev => prev.filter(b => b.title !== title)); setSelectedBook(null); };
   
-  const handleToggleStatus = async (id: number | string, newStatus: 'owned' | 'borrowed' | 'wishlist') => { 
-      if (!selectedBook) return; 
-      const libBook = library.find(b => b.title === selectedBook.title); 
-      if (libBook) { 
-          await supabase.from('library').update({ ownership_status: newStatus }).eq('id', libBook.id); 
-          setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, ownership_status: newStatus } : b)); 
-          setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null); 
-      }
+  const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => { 
+      await supabase.from('library').update({ ownership_status: newStatus }).eq('id', id); 
+      setLibrary(prev => prev.map(b => b.id === id ? { ...b, ownership_status: newStatus } : b)); 
+      setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null); 
+  };
+
+  const handleUpdateWishlist = async (id: string, inWishlist: boolean) => {
+      await supabase.from('library').update({ in_wishlist: inWishlist }).eq('id', id);
+      setLibrary(prev => prev.map(b => b.id === id ? { ...b, in_wishlist: inWishlist } : b));
+      setSelectedBook(prev => prev ? { ...prev, inWishlist: inWishlist } : null);
+  };
+
+  const handleUpdateRating = async (id: string, rating: number) => {
+      await supabase.from('library').update({ rating }).eq('id', id);
+      setLibrary(prev => prev.map(b => b.id === id ? { ...b, rating } : b));
+      setSelectedBook(prev => prev ? { ...prev, rating } : null);
+  };
+
+  const handleUpdateMemo = async (id: string, memo: string) => {
+      await supabase.from('library').update({ memo }).eq('id', id);
+      setLibrary(prev => prev.map(b => b.id === id ? { ...b, memo } : b));
+      setSelectedBook(prev => prev ? { ...prev, memo } : null);
   };
 
   const handleUpdateShelves = async (id: string | number, newShelves: string[]) => {
@@ -362,20 +458,32 @@ export default function Home() {
       }
   };
 
-  // NEW: Discover Handler (Quick Add from Recommendations)
   const handleDiscoverAdd = async (title: string, author: string, status: 'owned' | 'wishlist') => {
       if (!session) return;
+      const isWishlist = status === 'wishlist';
       const { data } = await supabase.from('library').insert({
           user_id: session.user.id,
           title,
           author,
-          ownership_status: status
+          ownership_status: isWishlist ? 'owned' : 'owned', 
+          in_wishlist: isWishlist,
+          rating: 0,
+          memo: ''
       }).select().single();
       
       if (data) {
           setLibrary(prev => [...prev, data as Book]);
       }
   };
+
+  const handleShareRegistry = () => {
+      const url = `${window.location.origin}/registry/${session.user.id}`;
+      navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+  };
+
+  const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
   const selectedBookHistory = useMemo(() => { 
       if (!selectedBook) return []; 
@@ -384,11 +492,9 @@ export default function Home() {
         } as any)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); 
   }, [selectedBook, logs]);
 
-  const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
-
-  // --- SUB-COMPONENTS ---
-
-  const ParentDashboard = () => (
+  // --- RENDER FUNCTIONS (No Sub-Components!) ---
+  
+  const renderParentDashboard = () => (
       <div className="animate-in fade-in zoom-in-95 duration-300 pb-20">
           <div className="flex items-center gap-4 py-6 mb-4">
              <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white"><Settings size={24} /></div>
@@ -423,7 +529,7 @@ export default function Home() {
       </div>
   );
 
-  const HomeView = () => (
+  const renderHomeView = () => (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
       <section className="flex flex-col items-center justify-center py-12">
           <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Weekly Reads</h2>
@@ -464,20 +570,7 @@ export default function Home() {
     </div>
   );
 
-  const LibraryView = () => {
-    const [search, setSearch] = useState('');
-    const [filter, setFilter] = useState('owned'); 
-    const [copied, setCopied] = useState(false);
-    
-    // NEW: Get all unique shelves from library
-    const uniqueShelves = useMemo(() => {
-        const shelves = new Set<string>();
-        library.forEach(book => {
-            if (book.shelves) book.shelves.forEach(s => shelves.add(s));
-        });
-        return Array.from(shelves).sort();
-    }, [library]);
-
+  const renderLibraryView = () => {
     const filters = [
         { id: 'owned', label: 'Library' },
         { id: 'wishlist', label: 'Registry' },
@@ -485,22 +578,23 @@ export default function Home() {
         ...uniqueShelves.map(s => ({ id: s, label: s }))
     ];
 
+    // Filter Logic
     const filteredBooks: Book[] = library.filter(book => {
         const safeTitle = (book.title || '').toLowerCase();
         const safeAuthor = (book.author || '').toLowerCase();
         const searchLower = search.toLowerCase();
         const matchesSearch = safeTitle.includes(searchLower) || safeAuthor.includes(searchLower);
-        
         let matchesFilter = false;
         
-        if (filter === 'owned') matchesFilter = book.ownership_status === 'owned' || !book.ownership_status;
+        if (filter === 'owned') matchesFilter = book.ownership_status === 'owned' || (!book.ownership_status && !book.in_wishlist);
         else if (filter === 'borrowed') matchesFilter = book.ownership_status === 'borrowed';
-        else if (filter === 'wishlist') matchesFilter = book.ownership_status === 'wishlist';
+        else if (filter === 'wishlist') matchesFilter = book.in_wishlist === true;
         else matchesFilter = book.shelves?.includes(filter) || false; 
 
         return matchesSearch && matchesFilter;
     }).sort((a, b) => (getLastName(a.author || '').localeCompare(getLastName(b.author || ''))));
     
+    // Grouping
     const groupedBooks = filteredBooks.reduce((groups, book) => {
         const lastName = getLastName(book.author || 'Unknown');
         const letter = lastName.charAt(0).toUpperCase();
@@ -510,13 +604,6 @@ export default function Home() {
     }, {} as Record<string, Book[]>);
     
     const sortedKeys = Object.keys(groupedBooks).sort();
-
-    const handleShareRegistry = () => {
-        const url = `${window.location.origin}/registry/${session.user.id}`;
-        navigator.clipboard.writeText(url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
 
     return (
         <div className="animate-in fade-in slide-in-from-right-8 duration-300 pb-20">
@@ -562,7 +649,7 @@ export default function Home() {
                             {groupedBooks[letter].map((book: Book) => (
                                 <button 
                                     key={book.id} 
-                                    onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status, shelves: book.shelves })} 
+                                    onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status, shelves: book.shelves, inWishlist: book.in_wishlist, rating: book.rating, memo: book.memo || undefined })} 
                                     className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform"
                                 >
                                     <div className="w-12 h-16 shrink-0 bg-slate-100 rounded-xl overflow-hidden shadow-inner flex items-center justify-center text-slate-300">
@@ -571,6 +658,14 @@ export default function Home() {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
                                             <p className="font-bold text-slate-900 truncate">{book.title}</p>
+                                            {/* Rating Stars (Mini) */}
+                                            {book.rating > 0 && (
+                                                <div className="flex">
+                                                    {[...Array(book.rating)].map((_, i) => (
+                                                        <Star key={i} size={8} className="text-amber-400 fill-amber-400" />
+                                                    ))}
+                                                </div>
+                                            )}
                                             {/* Tag Badges */}
                                             {book.shelves && book.shelves.length > 0 && (
                                                 <div className="flex -space-x-1">
@@ -580,7 +675,7 @@ export default function Home() {
                                                 </div>
                                             )}
                                             {filter === 'all' && book.ownership_status === 'borrowed' && (<div className="px-1.5 py-0.5 bg-indigo-100 rounded-md"><StickyNote size={10} className="text-indigo-600" /></div>)}
-                                            {(filter === 'all' || filter === 'wishlist') && book.ownership_status === 'wishlist' && (<div className="px-1.5 py-0.5 bg-orange-100 rounded-md"><Gift size={10} className="text-orange-600" /></div>)}
+                                            {(filter === 'all' || filter === 'wishlist') && book.in_wishlist && (<div className="px-1.5 py-0.5 bg-orange-100 rounded-md"><Gift size={10} className="text-orange-600" /></div>)}
                                         </div>
                                         <p className="text-xs text-slate-500 font-medium truncate">{book.author}</p>
                                     </div>
@@ -595,60 +690,7 @@ export default function Home() {
     );
   };
 
-  const HistoryView = () => {
-    const chartData = useMemo(() => {
-        const days = [];
-        const now = new Date();
-        const currentDay = now.getDay(); 
-        const diff = currentDay === 0 ? 6 : currentDay - 1; 
-        const monday = new Date(now);
-        monday.setDate(now.getDate() - diff);
-        for (let i = 0; i < 7; i++) {
-            const d = new Date(monday);
-            d.setDate(monday.getDate() + i);
-            const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
-            let count = 0;
-            if (d <= now) {
-                count = logs.filter(item => { const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length;
-            }
-            days.push({ day: dayName, count, isToday: d.getDate() === now.getDate() && d.getMonth() === now.getMonth() }); 
-        } 
-        return days; 
-    }, [logs, activeReader]);
-    
-    const groupedHistory = useMemo(() => { 
-        const groups: { today: any[], yesterday: any[], week: any[], older: any[] } = { today: [], yesterday: [], week: [], older: [] };
-        const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        const aggregated: Record<string, any> = {};
-        sortedLog.forEach(item => {
-            const dateKey = new Date(item.timestamp).toLocaleDateString();
-            const key = `${dateKey}-${item.book_title}`;
-            if (!aggregated[key]) {
-                const libBook = library.find(b => b.title === item.book_title && b.author === item.book_author);
-                aggregated[key] = { 
-                    id: item.id, 
-                    title: item.book_title, 
-                    author: item.book_author, 
-                    cover: getBookCover(item.book_title), 
-                    dailyCount: 0, 
-                    timestamp: item.timestamp, 
-                    reader: item.reader_name, 
-                    notes: item.notes,
-                    ownershipStatus: libBook ? libBook.ownership_status : 'wishlist',
-                    shelves: libBook ? libBook.shelves : [] 
-                };
-            }
-            aggregated[key].dailyCount += 1;
-        });
-        Object.values(aggregated).forEach((item: any) => {
-            if (isToday(item.timestamp)) groups.today.push(item);
-            else if (isYesterday(item.timestamp)) groups.yesterday.push(item);
-            else if (isEarlierThisWeek(item.timestamp)) groups.week.push(item);
-            else groups.older.push(item);
-        });
-        return groups;
-    }, [stats.readerLog, library]);
-    
+  const renderHistoryView = () => {
     const isDailyGoalMet = stats.dailyCount >= stats.goals.daily;
     const isWeeklyGoalMet = stats.weeklyCount >= stats.goals.weekly;
 
@@ -737,7 +779,7 @@ export default function Home() {
         </div>
       </header>
       <main className="mt-20 px-6 max-w-lg mx-auto w-full">
-        {readers.length > 0 && activeReader === readers[readers.length-1] ? <ParentDashboard /> : (activeTab === 'library' ? <LibraryView /> : activeTab === 'home' ? <HomeView /> : <HistoryView />)}
+        {readers.length > 0 && activeReader === readers[readers.length-1] ? renderParentDashboard() : (activeTab === 'library' ? renderLibraryView() : activeTab === 'home' ? renderHomeView() : renderHistoryView())}
       </main>
       {readers.length > 0 && activeReader !== readers[readers.length-1] && (<nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]"><button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button></nav>)}
       {readers.length > 0 && activeReader !== readers[readers.length-1] && (
@@ -777,15 +819,16 @@ export default function Home() {
         onReadAgain={handleReadAgain} 
         onRemove={handleRemoveBook} 
         onDeleteAsset={handleDeleteAsset} 
-        onToggleStatus={handleToggleStatus}
+        onUpdateStatus={handleUpdateStatus} 
+        onUpdateWishlist={handleUpdateWishlist} 
+        onUpdateRating={handleUpdateRating} 
+        onUpdateMemo={handleUpdateMemo} 
         onUpdateShelves={handleUpdateShelves}
     />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
     <AvatarModal isOpen={isAvatarModalOpen} onClose={() => setAvatarModalOpen(false)} onSave={handleSaveAvatar} currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null} name={editingAvatarFor || ''} />
-    
-    {/* NEW: Discover Modal */}
     <DiscoverModal 
         isOpen={isDiscoverOpen} 
         onClose={() => setDiscoverOpen(false)} 
