@@ -384,7 +384,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 className="flex-1 py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
             >
                 <Plus size={20} strokeWidth={3} />
-                {logSession ? 'Add & Log' : 'Add to Shelf'}
+                {logSession ? 'Add & Log' : 'Add to Library'}
             </button>
 
             <button 

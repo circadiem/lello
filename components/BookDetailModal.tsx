@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Heart, Library, Plus, Tag } from 'lucide-react';
+import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Heart, Library, Plus, Tag, Gift } from 'lucide-react';
 
 interface DisplayItem {
   id: string | number;
@@ -125,53 +125,32 @@ export default function BookDetailModal({
                         <p className="text-slate-500 font-bold text-lg">{book.author}</p>
                     </div>
 
-                    {/* ACTIONS ROW: Rating & Status */}
-                    <div className="flex flex-wrap items-center gap-4 mb-8 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    {/* ACTIONS ROW: Status Toggles */}
+                    <div className="flex flex-wrap items-center gap-4 mb-8 p-4 bg-slate-50 rounded-2xl border border-slate-100 justify-center">
                         
-                        {/* 1. Star Rating */}
-                        <div className="flex gap-1">
-                            {[1, 2, 3, 4, 5].map((star) => (
-                                <button
-                                    key={star}
-                                    onMouseEnter={() => setHoverRating(star)}
-                                    onMouseLeave={() => setHoverRating(0)}
-                                    onClick={() => { setRating(star); onUpdateRating(String(book.id), star); }}
-                                    className="focus:outline-none transition-transform active:scale-90"
-                                >
-                                    <Star 
-                                        size={24} 
-                                        fill={(hoverRating || rating) >= star ? "#fbbf24" : "none"} 
-                                        className={(hoverRating || rating) >= star ? "text-amber-400" : "text-slate-300"} 
-                                    />
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="w-px h-8 bg-slate-200 mx-2 hidden sm:block"></div>
-
-                        {/* 2. Status Toggles */}
-                        <div className="flex gap-2">
+                        {/* Status Toggles */}
+                        <div className="flex gap-2 w-full">
                             {/* Owned / Borrowed Toggle */}
                             <button 
                                 onClick={() => onUpdateStatus(String(book.id), book.ownershipStatus === 'owned' ? 'borrowed' : 'owned')}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all ${book.ownershipStatus === 'borrowed' ? 'bg-indigo-100 text-indigo-700' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'}`}
+                                className={`flex-1 px-3 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${book.ownershipStatus === 'borrowed' ? 'bg-indigo-100 text-indigo-700' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'}`}
                             >
-                                {book.ownershipStatus === 'borrowed' ? <Clock size={14} /> : <Library size={14} />}
+                                {book.ownershipStatus === 'borrowed' ? <Clock size={16} /> : <Library size={16} />}
                                 {book.ownershipStatus === 'borrowed' ? 'Borrowed' : 'Owned'}
                             </button>
 
                             {/* Wishlist Toggle */}
                             <button 
                                 onClick={() => onUpdateWishlist(String(book.id), !book.inWishlist)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition-all ${book.inWishlist ? 'bg-rose-100 text-rose-600' : 'bg-white border border-slate-200 text-slate-400 hover:text-rose-400'}`}
+                                className={`flex-1 px-3 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${book.inWishlist ? 'bg-rose-100 text-rose-600' : 'bg-white border border-slate-200 text-slate-400 hover:text-rose-400'}`}
                             >
-                                <Heart size={14} fill={book.inWishlist ? "currentColor" : "none"} />
+                                <Heart size={16} fill={book.inWishlist ? "currentColor" : "none"} />
                                 {book.inWishlist ? 'Registry' : 'Wishlist'}
                             </button>
                         </div>
                     </div>
 
-                    {/* NEW: Shelves Manager */}
+                    {/* Shelves Manager */}
                     <div className="mb-8">
                         <div className="flex items-center gap-2 mb-3 pl-1">
                             <Tag size={12} className="text-slate-400" />
@@ -208,7 +187,7 @@ export default function BookDetailModal({
                             )}
                         </div>
                     </div>
-
+                    
                     {/* MEMO / MEMORY FIELD */}
                     <div className="mb-8">
                         <label className="flex items-center gap-2 text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">
@@ -225,6 +204,25 @@ export default function BookDetailModal({
                         />
                     </div>
 
+                    {/* Star Rating - MOVED HERE */}
+                    <div className="flex items-center justify-center gap-2 mb-8">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                            <button
+                                key={star}
+                                onMouseEnter={() => setHoverRating(star)}
+                                onMouseLeave={() => setHoverRating(0)}
+                                onClick={() => { setRating(star); onUpdateRating(String(book.id), star); }}
+                                className="focus:outline-none transition-transform active:scale-90"
+                            >
+                                <Star 
+                                    size={32} 
+                                    fill={(hoverRating || rating) >= star ? "#fbbf24" : "none"} 
+                                    className={(hoverRating || rating) >= star ? "text-amber-400" : "text-slate-300"} 
+                                />
+                            </button>
+                        ))}
+                    </div>
+
                     {/* Reading History */}
                     <div>
                         <div className="flex justify-between items-end mb-4">
@@ -232,9 +230,6 @@ export default function BookDetailModal({
                                 <Calendar size={14} />
                                 Reading History
                             </label>
-                            <button onClick={() => onReadAgain(book)} className="text-xs font-bold text-emerald-600 hover:underline">
-                                + Log Read
-                            </button>
                         </div>
                         
                         <div className="space-y-3">
@@ -262,9 +257,17 @@ export default function BookDetailModal({
                             )}
                         </div>
                     </div>
+                    
+                    {/* Main Action Button */}
+                    <div className="mt-8 p-4 bg-white border-t border-slate-100">
+                        <button onClick={() => onReadAgain(book)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2">
+                            <Plus size={20} strokeWidth={3} />
+                            Log Another Read
+                        </button>
+                    </div>
 
                     {/* Footer Actions */}
-                    <div className="mt-10 pt-6 border-t border-slate-100 flex justify-between items-center">
+                    <div className="mt-4 flex justify-center">
                          <button onClick={() => { onDeleteAsset(book.title); onClose(); }} className="text-red-400 text-xs font-bold hover:text-red-600 flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-lg transition-colors">
                             <Trash2 size={14} /> Delete Book Asset
                          </button>

@@ -294,7 +294,9 @@ export default function Home() {
     const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
     const dailyCount = readerLog.filter(item => isToday(item.timestamp)).length; 
     const weeklyCount = readerLog.filter(item => isThisWeek(item.timestamp)).length;
-    return { dailyCount, weeklyCount, readerLog, goals: currentGoals };
+    // NEW: Calculate Lifetime Reads for the active reader
+    const lifetimeCount = readerLog.length;
+    return { dailyCount, weeklyCount, lifetimeCount, readerLog, goals: currentGoals };
   }, [logs, activeReader, readerGoals]);
 
   const uniqueShelves = useMemo(() => {
@@ -532,13 +534,10 @@ export default function Home() {
   const renderHomeView = () => (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
       <section className="flex flex-col items-center justify-center py-12">
-          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Weekly Reads</h2>
-          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.weeklyCount}</div>
-          {stats.weeklyCount >= stats.goals.weekly && (
-              <div className="mt-4 px-4 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-widest animate-bounce">
-                  Weekly Target Met!
-              </div>
-          )}
+          {/* CHANGED: Label and Value for Lifetime Reads */}
+          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Lifetime Reads</h2>
+          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.lifetimeCount}</div>
+          {/* Removed Weekly Target Met banner as it's no longer relevant for lifetime reads */}
       </section>
       <section className="space-y-8">
         <div>
