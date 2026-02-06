@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Heart, Library, Plus, Tag, Gift } from 'lucide-react';
 
+// --- TYPES --- (Remain the same)
 interface DisplayItem {
   id: string | number;
   title: string;
@@ -12,10 +13,10 @@ interface DisplayItem {
   reader?: string;
   timestamp?: string;
   count?: number;
-  ownershipStatus?: 'owned' | 'borrowed'; // Removed 'wishlist' as status
-  inWishlist?: boolean;                   // Decoupled Flag
-  rating?: number;                        // 1-5
-  memo?: string;                          // General note
+  ownershipStatus?: 'owned' | 'borrowed';
+  inWishlist?: boolean;
+  rating?: number;
+  memo?: string;
   shelves?: string[]; 
 }
 
@@ -49,7 +50,6 @@ export default function BookDetailModal({
     
     const [memo, setMemo] = useState(book?.memo || '');
     const [rating, setRating] = useState(book?.rating || 0);
-    const [hoverRating, setHoverRating] = useState(0);
     
     // Shelves State
     const [isAddingShelf, setIsAddingShelf] = useState(false);
@@ -67,6 +67,8 @@ export default function BookDetailModal({
 
     const currentShelves = book.shelves || [];
     const coverImage = book.cover || book.cover_url;
+    const totalReads = book.count || history.length || 0;
+    const isOwned = book.ownershipStatus === 'owned';
 
     // Handle Memo Save (on blur)
     const handleMemoBlur = () => {
@@ -120,109 +122,111 @@ export default function BookDetailModal({
                 <div className="px-8 pt-10 pb-8 overflow-y-auto">
                     
                     {/* Title & Author */}
-                    <div className="mb-6">
+                    <div className="mb-8 text-center sm:text-left pl-32 sm:pl-0">
                         <h2 className="text-2xl font-extrabold text-slate-900 leading-tight mb-1">{book.title}</h2>
                         <p className="text-slate-500 font-bold text-lg">{book.author}</p>
                     </div>
 
-                    {/* ACTIONS ROW: Status Toggles */}
-                    <div className="flex flex-wrap items-center gap-4 mb-8 p-4 bg-slate-50 rounded-2xl border border-slate-100 justify-center">
-                        
-                        {/* Status Toggles */}
-                        <div className="flex gap-2 w-full">
-                            {/* Owned / Borrowed Toggle */}
-                            <button 
-                                onClick={() => onUpdateStatus(String(book.id), book.ownershipStatus === 'owned' ? 'borrowed' : 'owned')}
-                                className={`flex-1 px-3 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${book.ownershipStatus === 'borrowed' ? 'bg-indigo-100 text-indigo-700' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-100'}`}
-                            >
-                                {book.ownershipStatus === 'borrowed' ? <Clock size={16} /> : <Library size={16} />}
-                                {book.ownershipStatus === 'borrowed' ? 'Borrowed' : 'Owned'}
-                            </button>
+                    {/* NEW LAYOUT: Stats & Toggles Grid */}
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                        {/* 1. Total Reads */}
+                        <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center justify-center gap-1 text-center">
+                            <span className="text-3xl font-extrabold text-slate-900">{totalReads}</span>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Reads</span>
+                        </div>
 
-                            {/* Wishlist Toggle */}
-                            <button 
-                                onClick={() => onUpdateWishlist(String(book.id), !book.inWishlist)}
-                                className={`flex-1 px-3 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${book.inWishlist ? 'bg-rose-100 text-rose-600' : 'bg-white border border-slate-200 text-slate-400 hover:text-rose-400'}`}
-                            >
-                                <Heart size={16} fill={book.inWishlist ? "currentColor" : "none"} />
-                                {book.inWishlist ? 'Registry' : 'Wishlist'}
-                            </button>
+                        {/* 2. Owned / Borrowed Toggle */}
+                        <div className="p-2 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col justify-center">
+                           <div className="flex bg-slate-200/50 p-1 rounded-2xl h-full relative">
+                                <button 
+                                    onClick={() => onUpdateStatus(String(book.id), 'owned')}
+                                    className={`flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all duration-300 ${isOwned ? 'bg-white shadow-sm text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    <Library size={20} strokeWidth={2.5} />
+                                    <span className="text-[9px] font-bold uppercase tracking-wider">Owned</span>
+                                </button>
+                                <button 
+                                    onClick={() => onUpdateStatus(String(book.id), 'borrowed')}
+                                    className={`flex-1 flex flex-col items-center justify-center gap-1 rounded-xl transition-all duration-300 ${!isOwned ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    <Clock size={20} strokeWidth={2.5} />
+                                    <span className="text-[9px] font-bold uppercase tracking-wider">Borrowed</span>
+                                </button>
+                           </div>
                         </div>
                     </div>
 
-                    {/* Shelves Manager */}
-                    <div className="mb-8">
-                        <div className="flex items-center gap-2 mb-3 pl-1">
-                            <Tag size={12} className="text-slate-400" />
-                            <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">Shelves & Tags</h3>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                            {currentShelves.map(tag => (
-                                <span key={tag} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border border-slate-200">
-                                    {tag}
-                                    <button onClick={() => handleRemoveShelf(tag)} className="hover:text-red-500 transition-colors">
-                                        <X size={12} />
-                                    </button>
-                                </span>
-                            ))}
-                            
-                            {isAddingShelf ? (
-                                <input 
-                                    autoFocus
-                                    type="text"
-                                    placeholder="Tag name..."
-                                    className="px-3 py-1.5 bg-white border-2 border-slate-900 rounded-lg text-xs font-bold text-slate-900 outline-none w-32"
-                                    value={newShelf}
-                                    onChange={(e) => setNewShelf(e.target.value)}
-                                    onBlur={handleAddShelf}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleAddShelf()}
-                                />
-                            ) : (
+                    {/* Shelves & Rating Row */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+                        
+                        {/* Shelves */}
+                        <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-3 pl-1">
+                                <Tag size={12} className="text-slate-400" />
+                                <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase">Shelves & Tags</h3>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {currentShelves.map(tag => (
+                                    <span key={tag} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border border-slate-200">
+                                        {tag}
+                                        <button onClick={() => handleRemoveShelf(tag)} className="hover:text-red-500 transition-colors">
+                                            <X size={12} />
+                                        </button>
+                                    </span>
+                                ))}
                                 <button 
                                     onClick={() => setIsAddingShelf(true)}
                                     className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-50 text-slate-400 rounded-lg text-xs font-bold border border-dashed border-slate-300 hover:border-slate-400 hover:text-slate-600 transition-all"
                                 >
                                     <Plus size={12} /> Add Tag
                                 </button>
+                            </div>
+                            {isAddingShelf && (
+                                <input 
+                                    autoFocus
+                                    type="text"
+                                    placeholder="Tag name..."
+                                    className="mt-2 px-3 py-1.5 bg-white border-2 border-slate-900 rounded-lg text-xs font-bold text-slate-900 outline-none w-full"
+                                    value={newShelf}
+                                    onChange={(e) => setNewShelf(e.target.value)}
+                                    onBlur={handleAddShelf}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAddShelf()}
+                                />
                             )}
                         </div>
+
+                        {/* Star Rating */}
+                        <div className="flex gap-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                    key={star}
+                                    onClick={() => { setRating(star); onUpdateRating(String(book.id), star); }}
+                                    className="focus:outline-none transition-transform active:scale-90"
+                                >
+                                    {rating >= star ? (
+                                        <Star size={28} className="text-amber-400 fill-amber-400" />
+                                    ) : (
+                                        <Star size={28} className="text-slate-300" strokeWidth={1.5} />
+                                    )}
+                                </button>
+                            ))}
+                        </div>
                     </div>
+
+                    {/* Registry Button (Only if NOT owned) */}
+                    {!isOwned && (
+                        <button 
+                            onClick={() => {
+                                onUpdateWishlist(String(book.id), !book.inWishlist);
+                                onClose();
+                            }}
+                            className={`w-full mb-8 py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-colors ${book.inWishlist ? 'bg-rose-100 text-rose-600 border border-rose-200 hover:bg-rose-200' : 'bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100'}`}
+                        >
+                            <Gift size={18} />
+                            {book.inWishlist ? 'Remove from Registry' : 'Add to Registry (Wishlist)'}
+                        </button>
+                    )}
                     
-                    {/* MEMO / MEMORY FIELD */}
-                    <div className="mb-8">
-                        <label className="flex items-center gap-2 text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">
-                            <StickyNote size={14} />
-                            Book Memory
-                        </label>
-                        <textarea 
-                            className="w-full bg-yellow-50/50 border border-yellow-100 rounded-xl p-4 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 transition-all resize-none leading-relaxed"
-                            placeholder="e.g. Grandma gave this to Leo for his 3rd birthday..."
-                            rows={3}
-                            value={memo}
-                            onChange={(e) => setMemo(e.target.value)}
-                            onBlur={handleMemoBlur}
-                        />
-                    </div>
-
-                    {/* Star Rating - MOVED HERE */}
-                    <div className="flex items-center justify-center gap-2 mb-8">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                            <button
-                                key={star}
-                                onMouseEnter={() => setHoverRating(star)}
-                                onMouseLeave={() => setHoverRating(0)}
-                                onClick={() => { setRating(star); onUpdateRating(String(book.id), star); }}
-                                className="focus:outline-none transition-transform active:scale-90"
-                            >
-                                <Star 
-                                    size={32} 
-                                    fill={(hoverRating || rating) >= star ? "#fbbf24" : "none"} 
-                                    className={(hoverRating || rating) >= star ? "text-amber-400" : "text-slate-300"} 
-                                />
-                            </button>
-                        ))}
-                    </div>
-
                     {/* Reading History */}
                     <div>
                         <div className="flex justify-between items-end mb-4">

@@ -109,7 +109,7 @@ const getLastName = (fullName: string) => {
     return parts.length > 0 ? parts[parts.length - 1] : fullName;
 };
 
-// Fixed Avatar Helper (Prevents crash on empty name)
+// Fixed Avatar Helper (Prevents white screen crash on empty name)
 const getAvatarUrl = (name: string, map: Record<string, string>) => {
     if (!name) return 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'; 
     if (map[name]) return `/avatars/${map[name]}`;
@@ -225,7 +225,6 @@ const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: b
 
 // --- MAIN APP ---
 export default function Home() {
-  // Global State
   const [session, setSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -241,12 +240,10 @@ export default function Home() {
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
-  // UI State
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('owned'); 
   const [copied, setCopied] = useState(false);
 
-  // Modals
   const [isAddModalOpen, setAddModalOpen] = useState(false);
   const [selectedBook, setSelectedBook] = useState<DisplayItem | null>(null);
   const [isGoalModalOpen, setGoalModalOpen] = useState(false);
@@ -286,7 +283,9 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
-  // --- Derived Data & Helpers (MOVED UP) ---
+  // --- Derived Data & Helpers ---
+  
+  // FIX: Moved getBookCover HERE (Before useMemo) to prevent ReferenceError
   const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
   const stats = useMemo(() => {
@@ -358,7 +357,7 @@ export default function Home() {
           else groups.older.push(item);
       });
       return groups;
-  }, [stats.readerLog, library]);
+  }, [stats.readerLog, library, getBookCover]); // Added getBookCover as dependency
 
   // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {
@@ -393,6 +392,10 @@ export default function Home() {
     setAddModalOpen(false); 
     if (!session) return;
     const existingBook = library.find(b => b.title === book.title && b.author === book.author);
+    
+    let bookId;
+    let bookCover = book.coverUrl;
+
     if (!existingBook) { 
         const isWishlist = status === 'wishlist';
         const { data: newBook } = await supabase.from('library').insert({ 
@@ -405,9 +408,17 @@ export default function Home() {
             rating: 0,
             memo: ''
         }).select().single();
-        if (newBook) setLibrary(prev => [...prev, newBook as Book]); 
+        if (newBook) {
+            setLibrary(prev => [...prev, newBook as Book]);
+            bookId = newBook.id;
+        }
+    } else {
+        bookId = existingBook.id;
+        bookCover = existingBook.cover_url || book.coverUrl;
     }
+
     if (status === 'wishlist' || !shouldLog) return;
+    
     const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
     const timestamp = new Date().toISOString();
     const newLogs = readersToAdd.map(reader => ({ 
@@ -418,7 +429,7 @@ export default function Home() {
         const castLogs = insertedLogs as ReadingLog[]; 
         setLogs(prev => [...castLogs, ...prev]); 
         setSelectedBook({ 
-            id: castLogs[0].id, title: book.title, author: book.author, cover: book.coverUrl || undefined, reader: castLogs[0].reader_name, timestamp: castLogs[0].timestamp, ownershipStatus: 'owned', inWishlist: false, rating: 0, memo: ''
+            id: castLogs[0].id, title: book.title, author: book.author, cover: bookCover || undefined, reader: castLogs[0].reader_name, timestamp: castLogs[0].timestamp, ownershipStatus: 'owned', inWishlist: false, rating: 0, memo: ''
         }); 
     }
   };
@@ -537,7 +548,6 @@ export default function Home() {
           {/* CHANGED: Label and Value for Lifetime Reads */}
           <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Lifetime Reads</h2>
           <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.lifetimeCount}</div>
-          {/* Removed Weekly Target Met banner as it's no longer relevant for lifetime reads */}
       </section>
       <section className="space-y-8">
         <div>
