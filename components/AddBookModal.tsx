@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Star } from 'lucide-react';
 
-// Unified type matching the API response
 export interface GoogleBook {
   id: string; 
   title: string;
@@ -69,7 +68,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
       return () => clearTimeout(delayDebounceFn);
   }, [query, initialQuery]);
 
-  // Updated: Uses the Smart Search API
   const searchBooks = async (searchTerm: string) => {
     if (!searchTerm || searchTerm.length < 2) return;
     setLoading(true);
@@ -83,6 +81,19 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ query: searchTerm })
         });
+
+        // Safe Response Handling
+        const contentType = response.headers.get("content-type");
+        if (!response.ok) {
+             throw new Error(`Server Error: ${response.status}`);
+        }
+        
+        // If the server returns HTML (error page) instead of JSON, fail gracefully
+        if (!contentType || !contentType.includes("application/json")) {
+            const text = await response.text();
+            console.error("API returned non-JSON:", text);
+            throw new Error("Search service unavailable (Invalid Response).");
+        }
 
         const data = await response.json();
 
@@ -99,7 +110,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         }
 
     } catch (err: any) {
-      console.error(err);
+      console.error("Search Fetch Error:", err);
       setError("Search failed. Please try again.");
     } finally {
       setLoading(false);
@@ -165,7 +176,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            </div>
 
            {error && (
-               <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-sm font-bold flex items-center gap-2">
+               <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-sm font-bold flex items-center gap-2 animate-in slide-in-from-top-2">
                    <AlertCircle size={18} />
                    <span>{error}</span>
                </div>
@@ -180,7 +191,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                <div className="animate-in fade-in zoom-in-95 duration-300">
                    <div className="flex items-center gap-2 mb-3 pl-2">
                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Top Match</p>
-                       {results[0].popularity && results[0].popularity > 100 ? (
+                       {(results[0].popularity || 0) > 100 ? (
                            <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full flex items-center gap-1 shadow-sm border border-amber-200">
                                <Star size={10} fill="currentColor" /> Popular
                            </span>
@@ -229,8 +240,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-slate-900 line-clamp-1">{book.title}</p>
-                    {/* Fixed: Logic here prevents stray 0s */}
-                    {book.popularity && book.popularity > 500 && <Star size={10} className="text-amber-500 fill-amber-500" />}
+                    {(book.popularity || 0) > 500 && <Star size={10} className="text-amber-500 fill-amber-500" />}
                   </div>
                   <p className="text-xs text-slate-500 font-medium line-clamp-1">{book.author}</p>
                </div>
@@ -281,7 +291,6 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 className="flex-1 py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
             >
                 <Plus size={20} strokeWidth={3} />
-                {/* Updated Button Text */}
                 {logSession ? 'Add & Log' : 'Add to Library'}
             </button>
 
