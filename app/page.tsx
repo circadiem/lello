@@ -63,7 +63,7 @@ interface DisplayItem {
   dailyCount?: number;
 }
 
-// --- HELPERS (Outside Component) ---
+// --- HELPERS ---
 const isToday = (isoString?: string) => {
     if (!isoString) return false;
     const date = new Date(isoString);
@@ -109,7 +109,6 @@ const getLastName = (fullName: string) => {
     return parts.length > 0 ? parts[parts.length - 1] : fullName;
 };
 
-// Fixed Avatar Helper (Prevents crash on empty name)
 const getAvatarUrl = (name: string, map: Record<string, string>) => {
     if (!name) return 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'; 
     if (map[name]) return `/avatars/${map[name]}`;
@@ -286,7 +285,6 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
-  // --- Derived Data & Helpers ---
   const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
   const stats = useMemo(() => {
@@ -294,7 +292,6 @@ export default function Home() {
     const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
     const dailyCount = readerLog.filter(item => isToday(item.timestamp)).length; 
     const weeklyCount = readerLog.filter(item => isThisWeek(item.timestamp)).length;
-    // NEW: Calculate Lifetime Reads for the active reader
     const lifetimeCount = readerLog.length;
     return { dailyCount, weeklyCount, lifetimeCount, readerLog, goals: currentGoals };
   }, [logs, activeReader, readerGoals]);
@@ -389,13 +386,12 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
-  // --- FIXED: HANDLE ADD BOOK ---
-  // Manually injects new data into state to avoid "race condition" missing covers
+  // --- FIXED: ADD BOOK LOGIC ---
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
     setAddModalOpen(false); 
     if (!session) return;
     
-    // 1. Prepare New Book Data
+    // 1. Prepare Data
     const isWishlist = status === 'wishlist';
     const newBookPayload = { 
         user_id: session.user.id, 
@@ -408,19 +404,20 @@ export default function Home() {
         memo: ''
     };
 
-    // 2. Optimistic Update or DB Insert
+    // 2. Optimistic Library Update
     const existingBook = library.find(b => b.title === book.title && b.author === book.author);
 
     if (!existingBook) { 
+        // Insert to DB
         const { data: insertedBook, error } = await supabase.from('library').insert(newBookPayload).select().single();
         
+        // Manual State Update (Fixes missing library items)
         if (insertedBook) {
-            // CRITICAL: Update State Immediately
             setLibrary(prev => [...prev, insertedBook as Book]);
         }
     }
 
-    // 3. Add Reading Logs
+    // 3. Optimistic Logs Update
     if (status !== 'wishlist' && shouldLog) {
         const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
         const timestamp = new Date().toISOString();
@@ -435,11 +432,13 @@ export default function Home() {
         
         const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
         
+        // Manual State Update (Fixes missing activity covers)
         if (insertedLogs) {
-            // CRITICAL: Update Logs Immediately
             setLogs(prev => [...(insertedLogs as ReadingLog[]), ...prev]);
         }
     }
+    
+    // REMOVED: await fetchData() - This was deleting your new data by fetching stale data
   };
 
   const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => { e.stopPropagation(); if (!session) return; const newLog = { user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) setLogs(prev => [data as ReadingLog, ...prev]); };
