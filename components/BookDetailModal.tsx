@@ -71,7 +71,7 @@ export default function BookDetailModal({
     };
 
     return (
-        // FIX: z-[9999] forces this to be the absolute top layer.
+        // z-[9999] ensures this is the absolute top layer
         <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center sm:p-4">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
             
@@ -81,7 +81,13 @@ export default function BookDetailModal({
                 <div className="h-40 bg-slate-100 relative shrink-0 overflow-hidden">
                     {coverImage && (
                         <>
-                            <div className="absolute inset-0 bg-cover bg-center blur-2xl opacity-60 scale-110" style={{ backgroundImage: `url("${coverImage}")` }} />
+                            {/* FIX: Use real <img> tag instead of CSS background-image to guarantee loading */}
+                            <img 
+                                src={coverImage} 
+                                alt="Blur Background"
+                                className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-60 scale-110" 
+                            />
+                            {/* Gradient Overlay for text readability */}
                             <div className="absolute inset-0 bg-gradient-to-t from-white via-white/50 to-transparent" />
                         </>
                     )}
@@ -95,6 +101,7 @@ export default function BookDetailModal({
                     
                     {/* Header Row: Cover + Text */}
                     <div className="relative -mt-12 mb-8 flex items-end gap-6">
+                        
                         {/* Cover Image */}
                         <div className="w-28 aspect-[2/3] shrink-0 bg-white rounded-xl shadow-2xl border-4 border-white overflow-hidden flex items-center justify-center relative z-10">
                             {coverImage ? (
