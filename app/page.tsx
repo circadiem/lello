@@ -285,7 +285,15 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
-  const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
+  // FIX: Robust lookup for covers, handles exact matches and simple fuzzy logic
+  const getBookCover = (title: string) => {
+      if (!title) return null;
+      const exact = library.find(b => b.title === title);
+      if (exact) return exact.cover_url;
+      // Fuzzy fallback
+      const fuzzy = library.find(b => b.title.toLowerCase().trim() === title.toLowerCase().trim());
+      return fuzzy ? fuzzy.cover_url : null;
+  };
 
   const stats = useMemo(() => {
     const readerLog = logs.filter(item => item.reader_name === activeReader);
@@ -328,11 +336,12 @@ export default function Home() {
       const groups: { today: any[], yesterday: any[], week: any[], older: any[] } = { today: [], yesterday: [], week: [], older: [] };
       const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       const aggregated: Record<string, any> = {};
+      
       sortedLog.forEach(item => {
           const dateKey = new Date(item.timestamp).toLocaleDateString();
           const key = `${dateKey}-${item.book_title}`;
           if (!aggregated[key]) {
-              const libBook = library.find(b => b.title === item.book_title && b.author === item.book_author);
+              const libBook = library.find(b => b.title === item.book_title);
               aggregated[key] = { 
                   id: item.id, 
                   title: item.book_title, 
@@ -348,6 +357,7 @@ export default function Home() {
           }
           aggregated[key].dailyCount += 1;
       });
+      
       Object.values(aggregated).forEach((item: any) => {
           if (isToday(item.timestamp)) groups.today.push(item);
           else if (isYesterday(item.timestamp)) groups.yesterday.push(item);
@@ -355,7 +365,7 @@ export default function Home() {
           else groups.older.push(item);
       });
       return groups;
-  }, [stats.readerLog, library, getBookCover]);
+  }, [stats.readerLog, library]); // Removed getBookCover from dependencies as it's a function
 
   // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {
@@ -386,13 +396,48 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
-  // --- FIXED: ADD BOOK LOGIC (No Race Conditions) ---
+  // --- FIXED: ADD BOOK LOGIC (Optimistic Updates) ---
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
     setAddModalOpen(false); 
     if (!session) return;
     
-    // 1. Prepare Data
     const isWishlist = status === 'wishlist';
+    const timestamp = new Date().toISOString();
+    // Use a temp ID for optimistic UI
+    const tempId = `temp-${Date.now()}`;
+
+    // 1. OPTIMISTIC UPDATE: Add to Library State immediately
+    const optimisticBook: Book = { 
+        id: tempId,
+        user_id: session.user.id,
+        title: book.title,
+        author: book.author,
+        cover_url: book.coverUrl, 
+        ownership_status: isWishlist ? 'owned' : (status as 'owned' | 'borrowed'), 
+        in_wishlist: isWishlist,
+        rating: 0,
+        memo: '',
+        shelves: [],
+        created_at: timestamp
+    };
+    setLibrary(prev => [optimisticBook, ...prev]);
+
+    // 2. OPTIMISTIC UPDATE: Add to Logs State immediately if needed
+    if (!isWishlist && shouldLog) {
+        const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
+        const newOptimisticLogs = readersToAdd.map((reader, idx) => ({ 
+            id: `temp-log-${Date.now()}-${idx}`,
+            user_id: session.user.id, 
+            book_title: book.title, 
+            book_author: book.author, 
+            reader_name: reader, 
+            timestamp: timestamp, 
+            notes: note || undefined 
+        }));
+        setLogs(prev => [...newOptimisticLogs, ...prev]);
+    }
+
+    // 3. BACKGROUND: Insert to DB
     const newBookPayload = { 
         user_id: session.user.id, 
         title: book.title, 
@@ -402,25 +447,22 @@ export default function Home() {
         in_wishlist: isWishlist,
         rating: 0,
         memo: '',
-        shelves: [] // Explicitly set shelves to empty array to match Book type
+        shelves: []
     };
 
-    // 2. Insert to DB
-    // We do NOT wait for re-fetch. We assume success and update local state.
     const { data: insertedBook, error } = await supabase.from('library').insert(newBookPayload).select().single();
     
+    // 4. RECONCILE: If DB insert succeeds, swap temp ID with real ID
     if (insertedBook) {
-        // FORCE UPDATE LIBRARY STATE
-        // This ensures getBookCover() finds the book immediately for the Activity feed
-        setLibrary(prev => [insertedBook as Book, ...prev]);
+        setLibrary(prev => prev.map(b => b.id === tempId ? (insertedBook as Book) : b));
     } else if (error) {
         console.error("Library Insert Error:", error);
+        // Optionally revert state here if strict data integrity is needed
     }
 
-    // 3. Insert Logs
-    if (status !== 'wishlist' && shouldLog) {
+    // 5. BACKGROUND: Insert Logs to DB
+    if (!isWishlist && shouldLog) {
         const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
-        const timestamp = new Date().toISOString();
         const newLogs = readersToAdd.map(reader => ({ 
             user_id: session.user.id, 
             book_title: book.title, 
@@ -430,59 +472,142 @@ export default function Home() {
             notes: note || null 
         }));
         
-        const { data: insertedLogs, error: logError } = await supabase.from('reading_logs').insert(newLogs).select();
-        
+        const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
+        // We already updated logs optimistically, so usually we don't need to do anything here
+        // unless we want to swap IDs for delete/edit functionality later.
         if (insertedLogs) {
-            // FORCE UPDATE LOGS STATE
-            setLogs(prev => [...(insertedLogs as ReadingLog[]), ...prev]);
-        } else if (logError) {
-            console.error("Log Insert Error:", logError);
+             // Optional: Update IDs if you need them for deletion later in the same session
         }
     }
   };
 
-  const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => { e.stopPropagation(); if (!session) return; const newLog = { user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) setLogs(prev => [data as ReadingLog, ...prev]); };
-  const handleReadAgain = async (book: any) => { if (!session) return; const title = book.title || book.book_title; const author = book.author || book.book_author; const newLog = { user_id: session.user.id, book_title: title, book_author: author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) { setLogs(prev => [data as ReadingLog, ...prev]); setSelectedBook((prev) => prev ? ({ ...prev, count: (prev.count || 0) + 1 }) : null); }};
-  const handleRemoveBook = async (id: number | string) => { await supabase.from('reading_logs').delete().eq('id', id); setLogs(prev => prev.filter(i => i.id !== id)); setSelectedBook(null); };
-  const handleDeleteAsset = async (title: string) => { if (!session) return; await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id); setLibrary(prev => prev.filter(b => b.title !== title)); setSelectedBook(null); };
+  const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => { 
+      e.stopPropagation(); 
+      if (!session) return; 
+      
+      const timestamp = new Date().toISOString();
+      const newLog = { 
+          user_id: session.user.id, 
+          book_title: book.title, 
+          book_author: book.author, 
+          reader_name: activeReader, 
+          timestamp: timestamp 
+      };
+
+      // Optimistic Update
+      const optimisticLog: ReadingLog = { ...newLog, id: `temp-${Date.now()}` };
+      setLogs(prev => [optimisticLog, ...prev]);
+
+      const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); 
+      if (data) {
+          // Swap ID
+          setLogs(prev => prev.map(l => l.id === optimisticLog.id ? (data as ReadingLog) : l));
+      }
+  };
+
+  const handleReadAgain = async (book: any) => { 
+      if (!session) return; 
+      const title = book.title || book.book_title; 
+      const author = book.author || book.book_author; 
+      const timestamp = new Date().toISOString();
+
+      const newLog = { 
+          user_id: session.user.id, 
+          book_title: title, 
+          book_author: author, 
+          reader_name: activeReader, 
+          timestamp: timestamp
+      };
+
+      // Optimistic
+      const optimisticLog: ReadingLog = { ...newLog, id: `temp-${Date.now()}` };
+      setLogs(prev => [optimisticLog, ...prev]);
+      setSelectedBook((prev) => prev ? ({ ...prev, count: (prev.count || 0) + 1 }) : null);
+
+      const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); 
+      if (data) {
+          setLogs(prev => prev.map(l => l.id === optimisticLog.id ? (data as ReadingLog) : l));
+      }
+  };
+
+  const handleRemoveBook = async (id: number | string) => { 
+      // Optimistic Delete
+      setLogs(prev => prev.filter(i => i.id !== id)); 
+      setSelectedBook(null); 
+      // Background DB
+      await supabase.from('reading_logs').delete().eq('id', id); 
+  };
+
+  const handleDeleteAsset = async (title: string) => { 
+      if (!session) return; 
+      // Optimistic Delete
+      setLibrary(prev => prev.filter(b => b.title !== title)); 
+      setSelectedBook(null); 
+      // Background DB
+      await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id); 
+  };
   
   const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => { 
-      await supabase.from('library').update({ ownership_status: newStatus }).eq('id', id); 
+      // Optimistic
       setLibrary(prev => prev.map(b => b.id === id ? { ...b, ownership_status: newStatus } : b)); 
       setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null); 
+      // DB
+      await supabase.from('library').update({ ownership_status: newStatus }).eq('id', id); 
   };
 
   const handleUpdateWishlist = async (id: string, inWishlist: boolean) => {
-      await supabase.from('library').update({ in_wishlist: inWishlist }).eq('id', id);
+      // Optimistic
       setLibrary(prev => prev.map(b => b.id === id ? { ...b, in_wishlist: inWishlist } : b));
       setSelectedBook(prev => prev ? { ...prev, inWishlist: inWishlist } : null);
+      // DB
+      await supabase.from('library').update({ in_wishlist: inWishlist }).eq('id', id);
   };
 
   const handleUpdateRating = async (id: string, rating: number) => {
-      await supabase.from('library').update({ rating }).eq('id', id);
       setLibrary(prev => prev.map(b => b.id === id ? { ...b, rating } : b));
       setSelectedBook(prev => prev ? { ...prev, rating } : null);
+      await supabase.from('library').update({ rating }).eq('id', id);
   };
 
   const handleUpdateMemo = async (id: string, memo: string) => {
-      await supabase.from('library').update({ memo }).eq('id', id);
       setLibrary(prev => prev.map(b => b.id === id ? { ...b, memo } : b));
       setSelectedBook(prev => prev ? { ...prev, memo } : null);
+      await supabase.from('library').update({ memo }).eq('id', id);
   };
 
   const handleUpdateShelves = async (id: string | number, newShelves: string[]) => {
       if (!selectedBook) return; 
       const libBook = library.find(b => b.title === selectedBook.title);
       if (libBook) {
-          await supabase.from('library').update({ shelves: newShelves }).eq('id', libBook.id);
+          // Optimistic
           setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, shelves: newShelves } : b));
           setSelectedBook(prev => prev ? { ...prev, shelves: newShelves } : null);
+          // DB
+          await supabase.from('library').update({ shelves: newShelves }).eq('id', libBook.id);
       }
   };
 
   const handleDiscoverAdd = async (title: string, author: string, status: 'owned' | 'wishlist') => {
       if (!session) return;
       const isWishlist = status === 'wishlist';
+      
+      // Optimistic
+      const tempId = `temp-${Date.now()}`;
+      const optimisticBook: Book = {
+          id: tempId,
+          user_id: session.user.id,
+          title,
+          author,
+          cover_url: null,
+          ownership_status: 'owned',
+          in_wishlist: isWishlist,
+          rating: 0,
+          memo: '',
+          shelves: [],
+          created_at: new Date().toISOString()
+      };
+      setLibrary(prev => [optimisticBook, ...prev]);
+
       const { data } = await supabase.from('library').insert({
           user_id: session.user.id,
           title,
@@ -494,7 +619,7 @@ export default function Home() {
       }).select().single();
       
       if (data) {
-          setLibrary(prev => [...prev, data as Book]);
+          setLibrary(prev => prev.map(b => b.id === tempId ? (data as Book) : b));
       }
   };
 
@@ -512,7 +637,7 @@ export default function Home() {
         } as any)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); 
   }, [selectedBook, logs]);
 
-  // --- RENDER FUNCTIONS (No Sub-Components!) ---
+  // --- RENDER FUNCTIONS ---
   
   const renderParentDashboard = () => (
       <div className="animate-in fade-in zoom-in-95 duration-300 pb-20">
@@ -664,7 +789,7 @@ export default function Home() {
                         <div className="space-y-3">
                             {groupedBooks[letter].map((book: Book) => (
                                 <button 
-                                    key={book.id} 
+                                    key={book.id || `temp-${book.title}`} 
                                     onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status, shelves: book.shelves, inWishlist: book.in_wishlist, rating: book.rating, memo: book.memo || undefined })} 
                                     className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform"
                                 >
