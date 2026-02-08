@@ -286,7 +286,7 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
-  // --- Derived Data & Helpers (MOVED UP - FIXES REFERENCE ERROR) ---
+  // --- Derived Data & Helpers ---
   const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
   const stats = useMemo(() => {
@@ -389,17 +389,19 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
+  // --- CRITICAL FIX: Robust Add Book Handler ---
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
     setAddModalOpen(false); 
     if (!session) return;
-    const existingBook = library.find(b => b.title === book.title && b.author === book.author);
     
+    // 1. Ensure book is in Library (Check DB + Insert)
+    const existingBook = library.find(b => b.title === book.title && b.author === book.author);
     let bookId;
     let bookCover = book.coverUrl;
 
     if (!existingBook) { 
         const isWishlist = status === 'wishlist';
-        const { data: newBook } = await supabase.from('library').insert({ 
+        const { data: newBook, error } = await supabase.from('library').insert({ 
             user_id: session.user.id, 
             title: book.title, 
             author: book.author, 
@@ -409,8 +411,11 @@ export default function Home() {
             rating: 0,
             memo: ''
         }).select().single();
-        if (newBook) {
-            setLibrary(prev => [...prev, newBook as Book]);
+
+        if (error) {
+            console.error("Book Insert Failed (Likely Duplicate):", error);
+            // If it failed, it might exist in DB but not local state. Proceed to sync.
+        } else if (newBook) {
             bookId = newBook.id;
         }
     } else {
@@ -418,21 +423,25 @@ export default function Home() {
         bookCover = existingBook.cover_url || book.coverUrl;
     }
 
-    if (status === 'wishlist' || !shouldLog) return;
-    
-    const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
-    const timestamp = new Date().toISOString();
-    const newLogs = readersToAdd.map(reader => ({ 
-        user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: reader, timestamp: timestamp, notes: note || null 
-    }));
-    const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
-    if (insertedLogs) { 
-        const castLogs = insertedLogs as ReadingLog[]; 
-        setLogs(prev => [...castLogs, ...prev]); 
-        setSelectedBook({ 
-            id: castLogs[0].id, title: book.title, author: book.author, cover: bookCover || undefined, reader: castLogs[0].reader_name, timestamp: castLogs[0].timestamp, ownershipStatus: 'owned', inWishlist: false, rating: 0, memo: ''
-        }); 
+    // 2. Add Reading Logs
+    if (status !== 'wishlist' && shouldLog) {
+        const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
+        const timestamp = new Date().toISOString();
+        const newLogs = readersToAdd.map(reader => ({ 
+            user_id: session.user.id, 
+            book_title: book.title, 
+            book_author: book.author, 
+            reader_name: reader, 
+            timestamp: timestamp, 
+            notes: note || null 
+        }));
+        
+        await supabase.from('reading_logs').insert(newLogs);
     }
+
+    // 3. SOURCE OF TRUTH SYNC (Fixes missing covers & library items)
+    // Force a re-fetch of all data to ensure local state matches DB exactly
+    await fetchData(session.user.id);
   };
 
   const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => { e.stopPropagation(); if (!session) return; const newLog = { user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) setLogs(prev => [data as ReadingLog, ...prev]); };

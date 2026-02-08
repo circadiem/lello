@@ -71,20 +71,21 @@ export default function BookDetailModal({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
+        // FIX: z-[9999] forces this to be the absolute top layer.
+        <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center sm:p-4">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
             
             <div className="relative w-full max-w-lg max-h-[90vh] bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300">
                 
-                {/* Header Background (Just decorative now) */}
-                <div className="h-32 bg-slate-100 relative shrink-0">
+                {/* Header Background */}
+                <div className="h-40 bg-slate-100 relative shrink-0 overflow-hidden">
                     {coverImage && (
                         <>
-                            <div className="absolute inset-0 bg-cover bg-center blur-xl opacity-50" style={{ backgroundImage: `url(${coverImage})` }} />
-                            <div className="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent" />
+                            <div className="absolute inset-0 bg-cover bg-center blur-2xl opacity-60 scale-110" style={{ backgroundImage: `url("${coverImage}")` }} />
+                            <div className="absolute inset-0 bg-gradient-to-t from-white via-white/50 to-transparent" />
                         </>
                     )}
-                    <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur-md rounded-full text-slate-500 hover:bg-white transition-all shadow-sm z-10">
+                    <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur-md rounded-full text-slate-500 hover:bg-white transition-all shadow-sm z-50">
                         <X size={20} />
                     </button>
                 </div>
@@ -92,12 +93,10 @@ export default function BookDetailModal({
                 {/* Body */}
                 <div className="px-8 pb-8 overflow-y-auto">
                     
-                    {/* NEW LAYOUT: Flex Row to lock items together */}
-                    {/* -mt-16 pulls this container UP over the header background */}
-                    <div className="relative -mt-16 mb-8 flex items-end gap-6">
-                        
-                        {/* 1. Cover Image (Static width, no absolute positioning) */}
-                        <div className="w-28 h-40 shrink-0 bg-white rounded-xl shadow-2xl border-4 border-white overflow-hidden flex items-center justify-center">
+                    {/* Header Row: Cover + Text */}
+                    <div className="relative -mt-12 mb-8 flex items-end gap-6">
+                        {/* Cover Image */}
+                        <div className="w-28 aspect-[2/3] shrink-0 bg-white rounded-xl shadow-2xl border-4 border-white overflow-hidden flex items-center justify-center relative z-10">
                             {coverImage ? (
                                 <img src={coverImage} className="w-full h-full object-cover" /> 
                             ) : (
@@ -105,8 +104,8 @@ export default function BookDetailModal({
                             )}
                         </div>
 
-                        {/* 2. Title & Author (Strictly to the right of the cover) */}
-                        <div className="flex-1 min-w-0 pb-1 text-left">
+                        {/* Title & Author */}
+                        <div className="flex-1 min-w-0 pb-1 text-left relative z-10">
                             <h2 className="text-2xl font-extrabold text-slate-900 leading-tight mb-1 text-left">{book.title}</h2>
                             <p className="text-slate-500 font-bold text-lg text-left">{book.author}</p>
                         </div>
@@ -139,7 +138,7 @@ export default function BookDetailModal({
                         </div>
                     </div>
 
-                    {/* STARS (Centered) - Shelves hidden for MVP */}
+                    {/* STARS (Centered) */}
                     <div className="flex items-center justify-center mb-8">
                         <div className="flex gap-1">
                             {[1, 2, 3, 4, 5].map((star) => (
