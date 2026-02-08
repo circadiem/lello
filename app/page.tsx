@@ -386,7 +386,7 @@ export default function Home() {
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
-  // --- FIXED: ADD BOOK LOGIC ---
+  // --- FIXED: ADD BOOK LOGIC (No Race Conditions) ---
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
     setAddModalOpen(false); 
     if (!session) return;
@@ -401,23 +401,23 @@ export default function Home() {
         ownership_status: isWishlist ? 'owned' : status, 
         in_wishlist: isWishlist,
         rating: 0,
-        memo: ''
+        memo: '',
+        shelves: [] // Explicitly set shelves to empty array to match Book type
     };
 
-    // 2. Optimistic Library Update
-    const existingBook = library.find(b => b.title === book.title && b.author === book.author);
-
-    if (!existingBook) { 
-        // Insert to DB
-        const { data: insertedBook, error } = await supabase.from('library').insert(newBookPayload).select().single();
-        
-        // Manual State Update (Fixes missing library items)
-        if (insertedBook) {
-            setLibrary(prev => [...prev, insertedBook as Book]);
-        }
+    // 2. Insert to DB
+    // We do NOT wait for re-fetch. We assume success and update local state.
+    const { data: insertedBook, error } = await supabase.from('library').insert(newBookPayload).select().single();
+    
+    if (insertedBook) {
+        // FORCE UPDATE LIBRARY STATE
+        // This ensures getBookCover() finds the book immediately for the Activity feed
+        setLibrary(prev => [insertedBook as Book, ...prev]);
+    } else if (error) {
+        console.error("Library Insert Error:", error);
     }
 
-    // 3. Optimistic Logs Update
+    // 3. Insert Logs
     if (status !== 'wishlist' && shouldLog) {
         const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
         const timestamp = new Date().toISOString();
@@ -430,15 +430,15 @@ export default function Home() {
             notes: note || null 
         }));
         
-        const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
+        const { data: insertedLogs, error: logError } = await supabase.from('reading_logs').insert(newLogs).select();
         
-        // Manual State Update (Fixes missing activity covers)
         if (insertedLogs) {
+            // FORCE UPDATE LOGS STATE
             setLogs(prev => [...(insertedLogs as ReadingLog[]), ...prev]);
+        } else if (logError) {
+            console.error("Log Insert Error:", logError);
         }
     }
-    
-    // REMOVED: await fetchData() - This was deleting your new data by fetching stale data
   };
 
   const handleQuickAdd = async (e: React.MouseEvent, book: DisplayItem) => { e.stopPropagation(); if (!session) return; const newLog = { user_id: session.user.id, book_title: book.title, book_author: book.author, reader_name: activeReader, timestamp: new Date().toISOString() }; const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); if (data) setLogs(prev => [data as ReadingLog, ...prev]); };

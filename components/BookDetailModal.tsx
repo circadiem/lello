@@ -71,17 +71,23 @@ export default function BookDetailModal({
     };
 
     return (
-        <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center sm:p-4">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
+        // FIX 1: z-[200] to sit above header.
+        // FIX 2: pt-24 (padding-top) pushes the modal DOWN so it physically cannot be hidden by the header.
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center sm:p-4 pt-24 pointer-events-none">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity pointer-events-auto" onClick={onClose} />
             
-            <div className="relative w-full max-w-lg max-h-[90vh] bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300">
+            <div className="relative w-full max-w-lg max-h-[85vh] bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-300 pointer-events-auto">
                 
-                {/* Header Background with Fallback Color */}
-                <div className="h-40 bg-gradient-to-br from-indigo-50 to-purple-50 relative shrink-0 overflow-hidden">
+                {/* Header Background */}
+                <div className="h-40 bg-slate-100 relative shrink-0 overflow-hidden">
                     {coverImage && (
                         <>
-                            <div className="absolute inset-0 bg-cover bg-center blur-2xl opacity-60 scale-110" style={{ backgroundImage: `url("${coverImage}")` }} />
-                            <div className="absolute inset-0 bg-gradient-to-t from-white via-white/50 to-transparent" />
+                            <img 
+                                src={coverImage} 
+                                className="absolute inset-0 w-full h-full object-cover blur-xl opacity-50 scale-110" 
+                                alt="Background"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-white via-white/40 to-transparent" />
                         </>
                     )}
                     <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur-md rounded-full text-slate-500 hover:bg-white transition-all shadow-sm z-50">
@@ -94,11 +100,10 @@ export default function BookDetailModal({
                     
                     {/* Header Row: Cover + Text */}
                     <div className="relative -mt-12 mb-8 flex items-end gap-6">
-                        
                         {/* Cover Image */}
                         <div className="w-28 aspect-[2/3] shrink-0 bg-white rounded-xl shadow-2xl border-4 border-white overflow-hidden flex items-center justify-center relative z-10">
                             {coverImage ? (
-                                <img src={coverImage} className="w-full h-full object-cover" /> 
+                                <img src={coverImage} className="w-full h-full object-cover" alt="Cover" /> 
                             ) : (
                                 <BookOpen size={32} className="text-slate-300" />
                             )}
