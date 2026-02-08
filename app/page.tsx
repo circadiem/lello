@@ -5,7 +5,7 @@ import {
     ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
     BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
-    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star
+    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star, Clock
   } from 'lucide-react';  
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
@@ -109,7 +109,7 @@ const getLastName = (fullName: string) => {
     return parts.length > 0 ? parts[parts.length - 1] : fullName;
 };
 
-// Fixed Avatar Helper (Prevents white screen crash on empty name)
+// Fixed Avatar Helper (Prevents crash on empty name)
 const getAvatarUrl = (name: string, map: Record<string, string>) => {
     if (!name) return 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'; 
     if (map[name]) return `/avatars/${map[name]}`;
@@ -225,6 +225,7 @@ const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: b
 
 // --- MAIN APP ---
 export default function Home() {
+  // Global State
   const [session, setSession] = useState<any>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -240,10 +241,12 @@ export default function Home() {
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
 
+  // UI State
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('owned'); 
   const [copied, setCopied] = useState(false);
 
+  // Modals
   const [isAddModalOpen, setAddModalOpen] = useState(false);
   const [selectedBook, setSelectedBook] = useState<DisplayItem | null>(null);
   const [isGoalModalOpen, setGoalModalOpen] = useState(false);
@@ -283,9 +286,7 @@ export default function Home() {
       if (logData) setLogs(logData as ReadingLog[]);
   };
 
-  // --- Derived Data & Helpers ---
-  
-  // FIX: Moved getBookCover HERE (Before useMemo) to prevent ReferenceError
+  // --- Derived Data & Helpers (MOVED UP - FIXES REFERENCE ERROR) ---
   const getBookCover = (title: string) => library.find(b => b.title === title)?.cover_url;
 
   const stats = useMemo(() => {
@@ -357,7 +358,7 @@ export default function Home() {
           else groups.older.push(item);
       });
       return groups;
-  }, [stats.readerLog, library, getBookCover]); // Added getBookCover as dependency
+  }, [stats.readerLog, library, getBookCover]);
 
   // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {

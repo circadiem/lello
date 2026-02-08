@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Heart, Library, Plus, Tag, Gift } from 'lucide-react';
+import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Tag, Gift } from 'lucide-react';
 
 interface DisplayItem {
   id: string | number;
@@ -50,8 +50,6 @@ export default function BookDetailModal({
     const [memo, setMemo] = useState(book?.memo || '');
     const [rating, setRating] = useState(book?.rating || 0);
     const [hoverRating, setHoverRating] = useState(0);
-    
-    // Shelves State
     const [isAddingShelf, setIsAddingShelf] = useState(false);
     const [newShelf, setNewShelf] = useState('');
 
@@ -119,13 +117,13 @@ export default function BookDetailModal({
                 {/* Body */}
                 <div className="px-8 pt-10 pb-8 overflow-y-auto">
                     
-                    {/* Title & Author (Left Aligned) */}
-                    <div className="mb-8 text-left pl-36 sm:pl-0 pt-2">
-                        <h2 className="text-2xl font-extrabold text-slate-900 leading-tight mb-1">{book.title}</h2>
-                        <p className="text-slate-500 font-bold text-lg">{book.author}</p>
+                    {/* Title & Author - STRICT LEFT ALIGNMENT */}
+                    <div className="mb-8 pl-36 pt-2 w-full text-left">
+                        <h2 className="text-2xl font-extrabold text-slate-900 leading-tight mb-1 text-left">{book.title}</h2>
+                        <p className="text-slate-500 font-bold text-lg text-left">{book.author}</p>
                     </div>
 
-                    {/* Stats & Toggles Grid */}
+                    {/* Stats & Toggles */}
                     <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col items-center justify-center gap-1 text-center">
                             <span className="text-3xl font-extrabold text-slate-900">{totalReads}</span>
@@ -152,10 +150,8 @@ export default function BookDetailModal({
                         </div>
                     </div>
 
-                    {/* Shelves & Stars Row (Fixed Layout) */}
-                    <div className="flex items-end justify-between gap-2 mb-8">
-                        
-                        {/* Shelves (Left) */}
+                    {/* Shelves (Left) & Stars (Right) */}
+                    <div className="flex items-end justify-between gap-4 mb-8">
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-2 pl-1">
                                 <Tag size={12} className="text-slate-400" />
@@ -192,7 +188,6 @@ export default function BookDetailModal({
                             </div>
                         </div>
 
-                        {/* Stars (Right) */}
                         <div className="flex gap-0.5 shrink-0 pb-1">
                             {[1, 2, 3, 4, 5].map((star) => (
                                 <button
@@ -213,7 +208,6 @@ export default function BookDetailModal({
                         </div>
                     </div>
 
-                    {/* Registry Button (Only if NOT owned) */}
                     {!isOwned && (
                         <button 
                             onClick={() => {
@@ -227,7 +221,6 @@ export default function BookDetailModal({
                         </button>
                     )}
                     
-                    {/* Memo & History sections remain identical */}
                     <div className="mb-8">
                         <label className="flex items-center gap-2 text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">
                             <StickyNote size={14} />
