@@ -14,7 +14,8 @@ import PinModal from '@/components/PinModal';
 import AddChildModal from '@/components/AddChildModal';
 import AvatarModal from '@/components/AvatarModal';
 import OnboardingWizard from '@/components/OnboardingWizard'; 
-import DiscoverModal from '@/components/DiscoverModal'; 
+import DiscoverModal from '@/components/DiscoverModal';
+import BarcodeScanner from '@/components/BarcodeScanner';
 import { supabase } from '@/lib/supabaseClient';
 
 // --- TYPES ---
@@ -247,6 +248,8 @@ export default function Home() {
 
   // Modals
   const [isAddModalOpen, setAddModalOpen] = useState(false);
+  const [isScannerOpen, setScannerOpen] = useState(false);
+  const [scanQuery, setScanQuery] = useState('');
   const [selectedBook, setSelectedBook] = useState<DisplayItem | null>(null);
   const [isGoalModalOpen, setGoalModalOpen] = useState(false);
   const [editingGoalType, setEditingGoalType] = useState<'daily' | 'weekly'>('daily');
@@ -890,9 +893,9 @@ export default function Home() {
     <>
     <div className="flex flex-col min-h-screen pb-32">
       <header className="fixed top-0 left-0 right-0 bg-slate-50/90 backdrop-blur-md z-[100] flex items-center justify-between px-6 py-4">
-        {/* Scanner Disabled */}
-        <button 
-            onClick={() => alert("Scan Barcode to Add to Library: Feature Coming Soon")} 
+        {/* Scanner */}
+        <button
+            onClick={() => setScannerOpen(true)}
             className="p-2 hover:bg-slate-100 rounded-2xl active:scale-90"
         >
             <ScanBarcode size={28} className="text-slate-900" />
@@ -932,7 +935,7 @@ export default function Home() {
         <div className="fixed bottom-24 left-0 right-0 flex justify-center items-center gap-4 z-40 pointer-events-none">
             {/* Standard Add Button */}
             <button 
-                onClick={() => setAddModalOpen(true)} 
+                onClick={() => { setScanQuery(''); setAddModalOpen(true); }}
                 className="pointer-events-auto bg-slate-900 text-slate-50 px-8 py-4 rounded-full font-bold shadow-2xl flex items-center gap-2 active:scale-95 transition-transform hover:bg-slate-800"
             >
                 <Plus size={20} strokeWidth={3} />
@@ -956,7 +959,16 @@ export default function Home() {
         onAdd={handleAddBook} 
         readers={readers.slice(0, -1)} 
         activeReader={activeReader === readers[readers.length-1] ? readers[0] : activeReader}
-        initialQuery={''} 
+        initialQuery={scanQuery}
+    />
+    <BarcodeScanner
+        isOpen={isScannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onDetected={(isbn) => {
+            setScannerOpen(false);
+            setScanQuery(isbn);     // search route auto-detects ISBN
+            setAddModalOpen(true);  // hand off to the existing add flow
+        }}
     />
     <BookDetailModal 
         book={selectedBook as any} 
