@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Sparkles, X, Search, BookOpen, Plus, Gift, Check, Loader2, ArrowRight } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
 
 interface Recommendation {
     title: string;
@@ -29,21 +30,35 @@ export default function DiscoverModal({ isOpen, onClose, onAddBook, userId }: Di
         if (!query.trim()) return;
         setLoading(true);
         setResults([]); // Clear previous
-        
+
         try {
+            // Get the logged-in user's access token to authenticate the request.
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                alert('Please log in again.');
+                setLoading(false);
+                return;
+            }
+
             const res = await fetch('/api/recommend', {
                 method: 'POST',
-                body: JSON.stringify({ query, userId })
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ query }), // userId no longer sent — server derives it
             });
             const data = await res.json();
-            
+
             if (data.success) {
                 setResults(data.recommendations);
                 setView('results');
+            } else {
+                alert(data.error || 'The Librarian is taking a nap. Try again.');
             }
         } catch (e) {
             console.error(e);
-            alert("The Librarian is taking a nap. Try again.");
+            alert('The Librarian is taking a nap. Try again.');
         } finally {
             setLoading(false);
         }
