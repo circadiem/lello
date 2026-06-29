@@ -51,6 +51,9 @@ export default function BarcodeScanner({ isOpen, onClose, onDetected }: BarcodeS
 
     const hints = new Map();
     hints.set(DecodeHintType.POSSIBLE_FORMATS, BOOK_FORMATS);
+    // TRY_HARDER spends more CPU per frame but is far more reliable on the
+    // dense, often slightly blurry barcodes printed on book covers.
+    hints.set(DecodeHintType.TRY_HARDER, true);
     const reader = new BrowserMultiFormatReader(hints);
 
     let cancelled = false;
@@ -58,7 +61,18 @@ export default function BarcodeScanner({ isOpen, onClose, onDetected }: BarcodeS
     (async () => {
       try {
         const controls = await reader.decodeFromConstraints(
-          { video: { facingMode: 'environment' } }, // prefer the back camera
+          {
+            // A book's EAN-13 bars are thin and close together. The browser's
+            // default stream is often only 640x480 and fixed-focus, which can't
+            // resolve them — so ask for a high-res, continuously-focused feed.
+            video: {
+              facingMode: 'environment', // prefer the back camera
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              // Non-standard but honored on many Android devices; ignored elsewhere.
+              advanced: [{ focusMode: 'continuous' } as any],
+            },
+          },
           videoRef.current!,
           (result) => {
             if (handledRef.current || !result) return;
@@ -75,6 +89,22 @@ export default function BarcodeScanner({ isOpen, onClose, onDetected }: BarcodeS
           return;
         }
         controlsRef.current = controls;
+
+        // Best-effort: explicitly request continuous autofocus on the live
+        // track for devices that expose it (mostly Android Chrome).
+        try {
+          const track = (videoRef.current?.srcObject as MediaStream | null)
+            ?.getVideoTracks?.()[0];
+          const caps: any = track?.getCapabilities?.();
+          if (track && caps?.focusMode?.includes?.('continuous')) {
+            await track.applyConstraints({
+              advanced: [{ focusMode: 'continuous' } as any],
+            });
+          }
+        } catch {
+          /* focus tuning is best-effort */
+        }
+
         setStatus('scanning');
       } catch (err: any) {
         console.error('Scanner error:', err);
