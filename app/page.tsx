@@ -19,6 +19,7 @@ import BarcodeScanner from '@/components/BarcodeScanner';
 import StreakCard from '@/components/StreakCard';
 import MilestoneToast, { Milestone } from '@/components/MilestoneToast';
 import { supabase } from '@/lib/supabaseClient';
+import { getStoredPin, storePin, clearStoredPin, PinRecord } from '@/lib/pin';
 
 // Reading milestones, celebrated once each per reader (tested against
 // lifetime read count and current streak length).
@@ -267,6 +268,8 @@ export default function Home() {
   const [isGoalModalOpen, setGoalModalOpen] = useState(false);
   const [editingGoalType, setEditingGoalType] = useState<'daily' | 'weekly'>('daily');
   const [isPinModalOpen, setPinModalOpen] = useState(false);
+  const [pinRecord, setPinRecord] = useState<PinRecord | null>(null);
+  const [pinIntent, setPinIntent] = useState<'access' | 'change'>('access');
   const [isChildModalOpen, setChildModalOpen] = useState(false);
   const [pendingReaderChange, setPendingReaderChange] = useState<string | null>(null);
   const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
@@ -294,6 +297,11 @@ export default function Home() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Load this device's saved parent PIN once we know who's signed in.
+  useEffect(() => {
+    if (session?.user?.id) setPinRecord(getStoredPin(session.user.id));
+  }, [session]);
 
   const fetchData = async (userId: string) => {
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
@@ -455,10 +463,30 @@ export default function Home() {
   const handleReaderChangeRequest = (name: string) => {
       setShowReaderMenu(false);
       const isParent = readers.length > 0 && name === readers[readers.length - 1];
-      if (isParent || name === 'Parents') { setPendingReaderChange(name); setPinModalOpen(true); } 
+      if (isParent || name === 'Parents') { setPinIntent('access'); setPendingReaderChange(name); setPinModalOpen(true); }
       else { setActiveReader(name); }
   };
-  const onPinSuccess = () => { setPinModalOpen(false); if (pendingReaderChange) { setActiveReader(pendingReaderChange); setPendingReaderChange(null); }};
+  // PIN verified (verify mode) → enter the pending parent profile.
+  const onPinVerified = () => { setPinModalOpen(false); if (pendingReaderChange) { setActiveReader(pendingReaderChange); setPendingReaderChange(null); }};
+  // PIN created/changed (set mode) → save to this device. First-time setup
+  // during a parent-access attempt also drops them into parent mode.
+  const onPinSet = (hash: string, salt: string) => {
+      if (session) storePin(session.user.id, hash, salt);
+      setPinRecord({ hash, salt });
+      setPinModalOpen(false);
+      if (pinIntent === 'access' && pendingReaderChange) { setActiveReader(pendingReaderChange); setPendingReaderChange(null); }
+      else { showToast('Parent PIN updated.'); }
+  };
+  const handleChangePin = () => { setPinIntent('change'); setPinModalOpen(true); };
+  const handleForgotPin = async () => {
+      if (!session?.user?.email) return;
+      const pw = prompt('Enter your account password to reset your PIN:');
+      if (!pw) return;
+      const { error } = await supabase.auth.signInWithPassword({ email: session.user.email, password: pw });
+      if (error) { showToast('Incorrect password.'); return; }
+      clearStoredPin(session.user.id);
+      setPinRecord(null); // modal re-renders into "set" mode so they pick a new PIN
+  };
   const handleAddChildClick = () => setChildModalOpen(true);
   const handleSaveChild = async (name: string, avatar: string | null) => {
       if (!readers.includes(name)) {
@@ -496,6 +524,8 @@ export default function Home() {
       await supabase.from('reading_logs').delete().eq('user_id', uid);
       await supabase.from('library').delete().eq('user_id', uid);
       await supabase.from('profiles').delete().eq('id', uid);
+      clearStoredPin(uid);
+      setPinRecord(null);
       await supabase.auth.signOut();
   };
   const handleUpdateChildGoal = async (child: string, type: 'daily' | 'weekly', value: number) => { const newGoals = { ...readerGoals, [child]: { ...(readerGoals[child] || readerGoals['default']), [type]: value } }; setReaderGoals(newGoals); await supabase.from('profiles').update({ goals: newGoals }).eq('id', session.user.id); };
@@ -816,6 +846,7 @@ export default function Home() {
               </section>
               <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
                   <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">System</h3>
+                  <button onClick={handleChangePin} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors mb-2">Change Parent PIN</button>
                   <button onClick={handleResetApp} className="w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl text-sm hover:bg-red-100 transition-colors">Factory Reset App</button>
                   <button onClick={handleLogout} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors mt-2">Log Out</button>
               </section>
@@ -1147,7 +1178,15 @@ export default function Home() {
         onUpdateShelves={handleUpdateShelves}
     />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
-    <PinModal isOpen={isPinModalOpen} onClose={() => setPinModalOpen(false)} onSuccess={onPinSuccess} />
+    <PinModal
+        isOpen={isPinModalOpen}
+        mode={pinIntent === 'change' || !pinRecord ? 'set' : 'verify'}
+        pinRecord={pinRecord}
+        onClose={() => setPinModalOpen(false)}
+        onVerified={onPinVerified}
+        onSet={onPinSet}
+        onForgot={handleForgotPin}
+    />
     <AddChildModal isOpen={isChildModalOpen} onClose={() => setChildModalOpen(false)} onAdd={handleSaveChild} existingNames={readers} />
     <AvatarModal isOpen={isAvatarModalOpen} onClose={() => setAvatarModalOpen(false)} onSave={handleSaveAvatar} currentAvatar={editingAvatarFor ? readerAvatars[editingAvatarFor] : null} name={editingAvatarFor || ''} />
     <DiscoverModal 
