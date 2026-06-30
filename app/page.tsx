@@ -5,8 +5,8 @@ import {
     ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
     BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
-    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star, Clock
-  } from 'lucide-react';  
+    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star, Clock, Wand2
+  } from 'lucide-react';
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
@@ -18,6 +18,7 @@ import DiscoverModal from '@/components/DiscoverModal';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import StreakCard from '@/components/StreakCard';
 import MilestoneToast, { Milestone } from '@/components/MilestoneToast';
+import MagicLogModal from '@/components/MagicLogModal';
 import { supabase } from '@/lib/supabaseClient';
 import { getStoredPin, storePin, clearStoredPin, PinRecord } from '@/lib/pin';
 
@@ -275,6 +276,7 @@ export default function Home() {
   const [isAvatarModalOpen, setAvatarModalOpen] = useState(false); 
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
   const [isDiscoverOpen, setDiscoverOpen] = useState(false);
+  const [isMagicLogOpen, setMagicLogOpen] = useState(false);
 
   // Lightweight feedback for failed writes + milestone celebrations.
   const [toast, setToast] = useState<string | null>(null);
@@ -803,6 +805,13 @@ export default function Home() {
       }
   };
 
+  const handleMagicLogged = (log: ReadingLog) => {
+      // The route already inserted the row; just reflect it locally.
+      setLogs(prev => [log, ...prev]);
+      if (log.reader_name) setActiveReader(log.reader_name);
+      showToast(`Logged "${log.book_title}" for ${log.reader_name}.`);
+  };
+
   const handleShareRegistry = () => {
       const url = `${window.location.origin}/registry/${session.user.id}`;
       navigator.clipboard.writeText(url);
@@ -1136,8 +1145,17 @@ export default function Home() {
                 <span>Add</span>
             </button>
             
+            {/* Quick Log (natural language) Button */}
+            <button
+                onClick={() => setMagicLogOpen(true)}
+                className="pointer-events-auto w-14 h-14 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-500 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform hover:shadow-emerald-500/25"
+                aria-label="Quick log"
+            >
+                <Wand2 size={22} />
+            </button>
+
             {/* Discover / AI Librarian Button */}
-            <button 
+            <button
                 onClick={() => setDiscoverOpen(true)}
                 className="pointer-events-auto w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform hover:shadow-indigo-500/25"
             >
@@ -1174,8 +1192,9 @@ export default function Home() {
         onUpdateStatus={handleUpdateStatus} 
         onUpdateWishlist={handleUpdateWishlist} 
         onUpdateRating={handleUpdateRating} 
-        onUpdateMemo={handleUpdateMemo} 
+        onUpdateMemo={handleUpdateMemo}
         onUpdateShelves={handleUpdateShelves}
+        allShelves={uniqueShelves}
     />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal
@@ -1194,6 +1213,12 @@ export default function Home() {
         onClose={() => setDiscoverOpen(false)} 
         onAddBook={handleDiscoverAdd}
         userId={session?.user?.id}
+    />
+    <MagicLogModal
+        isOpen={isMagicLogOpen}
+        onClose={() => setMagicLogOpen(false)}
+        readers={readers.slice(0, -1)}
+        onLogged={handleMagicLogged}
     />
     {milestoneToast && <MilestoneToast milestone={milestoneToast} onDone={() => setMilestoneToast(null)} />}
     {toast && (
