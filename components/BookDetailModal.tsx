@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift } from 'lucide-react';
+import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag } from 'lucide-react';
 
 /* ... (Interfaces remain the same) ... */
 interface DisplayItem {
@@ -41,23 +41,46 @@ interface BookDetailModalProps {
   onUpdateRating: (id: string, rating: number) => void;
   onUpdateMemo: (id: string, memo: string) => void;
   onUpdateShelves: (id: string | number, shelves: string[]) => void;
+  allShelves?: string[];
 }
 
-export default function BookDetailModal({ 
-    book, history, onClose, onReadAgain, onRemove, onDeleteAsset, 
-    onUpdateStatus, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves 
+export default function BookDetailModal({
+    book, history, onClose, onReadAgain, onRemove, onDeleteAsset,
+    onUpdateStatus, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves,
+    allShelves = []
 }: BookDetailModalProps) {
-    
+
     const [memo, setMemo] = useState(book?.memo || '');
     const [rating, setRating] = useState(book?.rating || 0);
     const [hoverRating, setHoverRating] = useState(0);
+    const [shelves, setShelves] = useState<string[]>(book?.shelves || []);
+    const [newShelf, setNewShelf] = useState('');
 
     useEffect(() => {
         if (book) {
             setMemo(book.memo || '');
             setRating(book.rating || 0);
+            setShelves(book.shelves || []);
+            setNewShelf('');
         }
     }, [book]);
+
+    const commitShelves = (next: string[]) => {
+        setShelves(next);
+        if (book) onUpdateShelves(book.id, next);
+    };
+    const addShelf = (raw: string) => {
+        const name = raw.trim();
+        if (!name) return;
+        if (shelves.some(s => s.toLowerCase() === name.toLowerCase())) { setNewShelf(''); return; }
+        commitShelves([...shelves, name]);
+        setNewShelf('');
+    };
+    const removeShelf = (name: string) => commitShelves(shelves.filter(s => s !== name));
+    // Existing shelves from other books that aren't on this one yet (quick-add).
+    const suggestions = allShelves.filter(
+        s => !shelves.some(cur => cur.toLowerCase() === s.toLowerCase())
+    );
 
     if (!book) return null;
 
@@ -226,6 +249,48 @@ export default function BookDetailModal({
                                 onChange={(e) => setMemo(e.target.value)}
                                 onBlur={handleMemoBlur}
                             />
+                        </div>
+
+                        {/* Shelves */}
+                        <div className="mb-8">
+                            <label className="flex items-center gap-2 text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-2">
+                                <Tag size={14} />
+                                Shelves
+                            </label>
+                            {shelves.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    {shelves.map(s => (
+                                        <span key={s} className="flex items-center gap-1.5 bg-slate-900 text-white text-xs font-bold rounded-full pl-3 pr-2 py-1.5">
+                                            {s}
+                                            <button onClick={() => removeShelf(s)} className="hover:text-rose-300" aria-label={`Remove ${s}`}>
+                                                <X size={12} strokeWidth={3} />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={newShelf}
+                                    onChange={(e) => setNewShelf(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addShelf(newShelf); } }}
+                                    placeholder="Add a shelf, e.g. Bedtime"
+                                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900/20 transition-all"
+                                />
+                                <button onClick={() => addShelf(newShelf)} disabled={!newShelf.trim()} className="px-4 rounded-xl bg-slate-900 text-white font-bold text-sm disabled:opacity-40 active:scale-95 transition-all">
+                                    Add
+                                </button>
+                            </div>
+                            {suggestions.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                    {suggestions.map(s => (
+                                        <button key={s} onClick={() => addShelf(s)} className="flex items-center gap-1 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-full px-3 py-1.5 hover:border-slate-400 hover:text-slate-700 transition-colors">
+                                            <Plus size={12} strokeWidth={3} /> {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {/* History */}
