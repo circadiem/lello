@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
@@ -16,7 +16,20 @@ import AvatarModal from '@/components/AvatarModal';
 import OnboardingWizard from '@/components/OnboardingWizard'; 
 import DiscoverModal from '@/components/DiscoverModal';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import StreakCard from '@/components/StreakCard';
+import MilestoneToast, { Milestone } from '@/components/MilestoneToast';
 import { supabase } from '@/lib/supabaseClient';
+
+// Reading milestones, celebrated once each per reader (tested against
+// lifetime read count and current streak length).
+const MILESTONES: (Milestone & { test: (s: { lifetime: number; streak: number }) => boolean })[] = [
+  { id: 'first-read', label: 'First book logged!', emoji: '📖', test: s => s.lifetime >= 1 },
+  { id: 'reads-10',   label: '10 reads',           emoji: '⭐', test: s => s.lifetime >= 10 },
+  { id: 'reads-50',   label: '50 reads',           emoji: '🌟', test: s => s.lifetime >= 50 },
+  { id: 'reads-100',  label: '100 reads!',         emoji: '🏆', test: s => s.lifetime >= 100 },
+  { id: 'streak-7',   label: '7-day streak',       emoji: '🔥', test: s => s.streak >= 7 },
+  { id: 'streak-30',  label: '30-day streak!',     emoji: '🚀', test: s => s.streak >= 30 },
+];
 
 // --- TYPES ---
 type Tab = 'library' | 'home' | 'history';
@@ -260,6 +273,15 @@ export default function Home() {
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
   const [isDiscoverOpen, setDiscoverOpen] = useState(false);
 
+  // Lightweight feedback for failed writes + milestone celebrations.
+  const [toast, setToast] = useState<string | null>(null);
+  const [milestoneToast, setMilestoneToast] = useState<Milestone | null>(null);
+  const celebratedInit = useRef<Set<string>>(new Set()); // readers backfilled this session
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -306,6 +328,65 @@ export default function Home() {
     const lifetimeCount = readerLog.length;
     return { dailyCount, weeklyCount, lifetimeCount, readerLog, goals: currentGoals };
   }, [logs, activeReader, readerGoals]);
+
+  // Reading streak for the active reader: consecutive calendar days with at
+  // least one logged read. `current` counts back from today (still "alive" if
+  // they read yesterday but not yet today); `longest` is their all-time best.
+  const streak = useMemo(() => {
+    const keyFor = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const dayKeys = new Set(stats.readerLog.map(l => keyFor(new Date(l.timestamp))));
+
+    let current = 0;
+    const cursor = new Date();
+    if (!dayKeys.has(keyFor(cursor))) cursor.setDate(cursor.getDate() - 1);
+    while (dayKeys.has(keyFor(cursor))) {
+      current++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    // Longest run, stepping day-by-day (DST-safe) over the sorted unique days.
+    const days = Array.from(dayKeys)
+      .map(k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m, d); })
+      .sort((a, b) => a.getTime() - b.getTime());
+    let longest = 0, run = 0;
+    let prev: Date | null = null;
+    for (const d of days) {
+      if (prev) {
+        const next = new Date(prev);
+        next.setDate(next.getDate() + 1);
+        run = keyFor(next) === keyFor(d) ? run + 1 : 1;
+      } else {
+        run = 1;
+      }
+      longest = Math.max(longest, run);
+      prev = d;
+    }
+    return { current, longest };
+  }, [stats.readerLog]);
+
+  // Milestone unlocks. Progress is kept in localStorage per (user, reader) so
+  // each badge only celebrates once. The first computation for a reader this
+  // session backfills silently (no retroactive spam for existing achievements).
+  useEffect(() => {
+    if (!activeReader || !session) return;
+    const key = `lello:badges:${session.user.id}:${activeReader}`;
+    let stored: string[] = [];
+    try { stored = JSON.parse(localStorage.getItem(key) || '[]'); } catch { /* ignore */ }
+
+    const ctx = { lifetime: stats.lifetimeCount, streak: streak.current };
+    const unlocked = MILESTONES.filter(m => m.test(ctx)).map(m => m.id);
+    const newly = unlocked.filter(id => !stored.includes(id));
+    if (newly.length === 0) return;
+
+    try { localStorage.setItem(key, JSON.stringify(unlocked)); } catch { /* ignore */ }
+
+    if (celebratedInit.current.has(activeReader)) {
+      const top = MILESTONES.filter(m => newly.includes(m.id)).pop();
+      if (top) setMilestoneToast({ id: top.id, label: top.label, emoji: top.emoji });
+    } else {
+      celebratedInit.current.add(activeReader);
+    }
+  }, [stats.lifetimeCount, streak.current, activeReader, session]);
 
   const uniqueShelves = useMemo(() => {
       const shelves = new Set<string>();
@@ -391,8 +472,32 @@ export default function Home() {
           setReaders(newReaders); setReaderGoals(newGoals); setReaderAvatars(newAvatars);
       }
   };
-  const handleDeleteChild = async (name: string) => { if (confirm(`Remove ${name}?`)) { const newReaders = readers.filter(r => r !== name); await supabase.from('profiles').update({ readers: newReaders }).eq('id', session.user.id); setReaders(newReaders); }};
-  const handleResetApp = async () => { if (confirm("WARNING: Delete all data? This cannot be undone.")) { window.location.reload(); } };
+  const handleDeleteChild = async (name: string) => {
+      if (!session) return;
+      if (!confirm(`Remove ${name}? This also permanently deletes their reading history. This cannot be undone.`)) return;
+      const newReaders = readers.filter(r => r !== name);
+      const newGoals = { ...readerGoals }; delete newGoals[name];
+      const newAvatars = { ...readerAvatars }; delete newAvatars[name];
+      // Optimistic local cleanup
+      setReaders(newReaders);
+      setReaderGoals(newGoals);
+      setReaderAvatars(newAvatars);
+      setLogs(prev => prev.filter(l => l.reader_name !== name));
+      if (activeReader === name) setActiveReader(newReaders[0] || '');
+      // Persist: profile + cascade-delete this reader's logs (RLS scopes to user)
+      await supabase.from('profiles').update({ readers: newReaders, goals: newGoals, avatars: newAvatars }).eq('id', session.user.id);
+      await supabase.from('reading_logs').delete().eq('user_id', session.user.id).eq('reader_name', name);
+  };
+  const handleResetApp = async () => {
+      if (!session) return;
+      if (!confirm("WARNING: This permanently deletes your library, all reading history, and family profiles. This cannot be undone.")) return;
+      const uid = session.user.id;
+      // Wipe data, then the profile (so the next sign-in starts fresh at onboarding).
+      await supabase.from('reading_logs').delete().eq('user_id', uid);
+      await supabase.from('library').delete().eq('user_id', uid);
+      await supabase.from('profiles').delete().eq('id', uid);
+      await supabase.auth.signOut();
+  };
   const handleUpdateChildGoal = async (child: string, type: 'daily' | 'weekly', value: number) => { const newGoals = { ...readerGoals, [child]: { ...(readerGoals[child] || readerGoals['default']), [type]: value } }; setReaderGoals(newGoals); await supabase.from('profiles').update({ goals: newGoals }).eq('id', session.user.id); };
   const handleGoalSave = (newGoal: number) => handleUpdateChildGoal(activeReader, editingGoalType, newGoal);
   const handleLogout = async () => { await supabase.auth.signOut(); };
@@ -426,27 +531,32 @@ export default function Home() {
     setLibrary(prev => [optimisticBook, ...prev]);
 
     // 2. OPTIMISTIC UPDATE: Add to Logs State immediately if needed
+    const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
+    const optimisticLogIds: string[] = [];
     if (!isWishlist && shouldLog) {
-        const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
-        const newOptimisticLogs = readersToAdd.map((reader, idx) => ({ 
-            id: `temp-log-${Date.now()}-${idx}`,
-            user_id: session.user.id, 
-            book_title: book.title, 
-            book_author: book.author, 
-            reader_name: reader, 
-            timestamp: timestamp, 
-            notes: note || undefined 
-        }));
+        const newOptimisticLogs = readersToAdd.map((reader, idx) => {
+            const id = `temp-log-${Date.now()}-${idx}`;
+            optimisticLogIds.push(id);
+            return {
+                id,
+                user_id: session.user.id,
+                book_title: book.title,
+                book_author: book.author,
+                reader_name: reader,
+                timestamp,
+                notes: note || undefined,
+            };
+        });
         setLogs(prev => [...newOptimisticLogs, ...prev]);
     }
 
     // 3. BACKGROUND: Insert to DB
-    const newBookPayload = { 
-        user_id: session.user.id, 
-        title: book.title, 
-        author: book.author, 
-        cover_url: book.coverUrl, 
-        ownership_status: isWishlist ? 'owned' : status, 
+    const newBookPayload = {
+        user_id: session.user.id,
+        title: book.title,
+        author: book.author,
+        cover_url: book.coverUrl,
+        ownership_status: isWishlist ? 'owned' : status,
         in_wishlist: isWishlist,
         rating: 0,
         memo: '',
@@ -454,32 +564,41 @@ export default function Home() {
     };
 
     const { data: insertedBook, error } = await supabase.from('library').insert(newBookPayload).select().single();
-    
-    // 4. RECONCILE: If DB insert succeeds, swap temp ID with real ID
+
+    // 4. RECONCILE: swap temp ID with the real row, or roll back on failure.
     if (insertedBook) {
         setLibrary(prev => prev.map(b => b.id === tempId ? (insertedBook as Book) : b));
     } else if (error) {
         console.error("Library Insert Error:", error);
-        // Optionally revert state here if strict data integrity is needed
+        setLibrary(prev => prev.filter(b => b.id !== tempId));
+        setLogs(prev => prev.filter(l => !optimisticLogIds.includes(l.id)));
+        showToast("Couldn't save that book. Please try again.");
+        return;
     }
 
     // 5. BACKGROUND: Insert Logs to DB
     if (!isWishlist && shouldLog) {
-        const readersToAdd = selectedReaders.length > 0 ? selectedReaders : [activeReader];
-        const newLogs = readersToAdd.map(reader => ({ 
-            user_id: session.user.id, 
-            book_title: book.title, 
-            book_author: book.author, 
-            reader_name: reader, 
-            timestamp: timestamp, 
-            notes: note || null 
+        const newLogs = readersToAdd.map(reader => ({
+            user_id: session.user.id,
+            book_title: book.title,
+            book_author: book.author,
+            reader_name: reader,
+            timestamp: timestamp,
+            notes: note || null
         }));
-        
-        const { data: insertedLogs } = await supabase.from('reading_logs').insert(newLogs).select();
-        // We already updated logs optimistically, so usually we don't need to do anything here
-        // unless we want to swap IDs for delete/edit functionality later.
-        if (insertedLogs) {
-             // Optional: Update IDs if you need them for deletion later in the same session
+
+        const { data: insertedLogs, error: logError } = await supabase.from('reading_logs').insert(newLogs).select();
+        if (logError) {
+            console.error("Log Insert Error:", logError);
+            setLogs(prev => prev.filter(l => !optimisticLogIds.includes(l.id)));
+            showToast("Saved the book, but couldn't log the read.");
+        } else if (insertedLogs) {
+            // Swap the optimistic logs for the real rows so they carry real IDs
+            // (needed to delete/edit them later this session).
+            setLogs(prev => [
+                ...(insertedLogs as ReadingLog[]),
+                ...prev.filter(l => !optimisticLogIds.includes(l.id)),
+            ]);
         }
     }
   };
@@ -501,14 +620,17 @@ export default function Home() {
       const optimisticLog: ReadingLog = { ...newLog, id: `temp-${Date.now()}` };
       setLogs(prev => [optimisticLog, ...prev]);
 
-      const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); 
+      const { data, error } = await supabase.from('reading_logs').insert(newLog).select().single();
       if (data) {
           // Swap ID
           setLogs(prev => prev.map(l => l.id === optimisticLog.id ? (data as ReadingLog) : l));
+      } else if (error) {
+          setLogs(prev => prev.filter(l => l.id !== optimisticLog.id));
+          showToast("Couldn't log that read. Please try again.");
       }
   };
 
-  const handleReadAgain = async (book: any) => { 
+  const handleReadAgain = async (book: any) => {
       if (!session) return; 
       const title = book.title || book.book_title; 
       const author = book.author || book.book_author; 
@@ -527,27 +649,33 @@ export default function Home() {
       setLogs(prev => [optimisticLog, ...prev]);
       setSelectedBook((prev) => prev ? ({ ...prev, count: (prev.count || 0) + 1 }) : null);
 
-      const { data } = await supabase.from('reading_logs').insert(newLog).select().single(); 
+      const { data, error } = await supabase.from('reading_logs').insert(newLog).select().single();
       if (data) {
           setLogs(prev => prev.map(l => l.id === optimisticLog.id ? (data as ReadingLog) : l));
+      } else if (error) {
+          setLogs(prev => prev.filter(l => l.id !== optimisticLog.id));
+          setSelectedBook(prev => prev ? ({ ...prev, count: Math.max((prev.count || 1) - 1, 0) }) : null);
+          showToast("Couldn't log that read. Please try again.");
       }
   };
 
-  const handleRemoveBook = async (id: number | string) => { 
+  const handleRemoveBook = async (id: number | string) => {
+      if (!confirm("Delete this reading log entry?")) return;
       // Optimistic Delete
-      setLogs(prev => prev.filter(i => i.id !== id)); 
-      setSelectedBook(null); 
+      setLogs(prev => prev.filter(i => i.id !== id));
+      setSelectedBook(null);
       // Background DB
-      await supabase.from('reading_logs').delete().eq('id', id); 
+      await supabase.from('reading_logs').delete().eq('id', id);
   };
 
-  const handleDeleteAsset = async (title: string) => { 
-      if (!session) return; 
+  const handleDeleteAsset = async (title: string) => {
+      if (!session) return;
+      if (!confirm(`Remove "${title}" from your library?`)) return;
       // Optimistic Delete
-      setLibrary(prev => prev.filter(b => b.title !== title)); 
-      setSelectedBook(null); 
+      setLibrary(prev => prev.filter(b => b.title !== title));
+      setSelectedBook(null);
       // Background DB
-      await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id); 
+      await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id);
   };
   
   const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => { 
@@ -611,18 +739,37 @@ export default function Home() {
       };
       setLibrary(prev => [optimisticBook, ...prev]);
 
-      const { data } = await supabase.from('library').insert({
+      // Best-effort cover enrichment: the AI only gives us a title/author, so
+      // look the book up via the same search route to grab a cover.
+      let coverUrl: string | null = null;
+      try {
+          const res = await fetch('/api/search', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: `${title} ${author}` }),
+          });
+          const searchData = await res.json();
+          coverUrl = searchData?.results?.[0]?.coverUrl ?? null;
+          if (coverUrl) setLibrary(prev => prev.map(b => b.id === tempId ? { ...b, cover_url: coverUrl } : b));
+      } catch { /* cover is best-effort */ }
+
+      const { data, error } = await supabase.from('library').insert({
           user_id: session.user.id,
           title,
           author,
-          ownership_status: isWishlist ? 'owned' : 'owned', 
+          cover_url: coverUrl,
+          ownership_status: 'owned',
           in_wishlist: isWishlist,
           rating: 0,
           memo: ''
       }).select().single();
-      
+
       if (data) {
           setLibrary(prev => prev.map(b => b.id === tempId ? (data as Book) : b));
+      } else if (error) {
+          console.error('Discover Add Error:', error);
+          setLibrary(prev => prev.filter(b => b.id !== tempId));
+          showToast("Couldn't add that book. Please try again.");
       }
   };
 
@@ -685,6 +832,24 @@ export default function Home() {
           <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.lifetimeCount}</div>
       </section>
       <section className="space-y-8">
+        <StreakCard current={streak.current} longest={streak.longest} readerName={activeReader} />
+        {(() => {
+          const earned = MILESTONES.filter(m => m.test({ lifetime: stats.lifetimeCount, streak: streak.current }));
+          if (earned.length === 0) return null;
+          return (
+            <div>
+              <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Achievements</h3>
+              <div className="flex flex-wrap gap-2">
+                {earned.map(m => (
+                  <div key={m.id} className="flex items-center gap-1.5 bg-white border border-slate-100 rounded-full pl-2 pr-3 py-1.5 shadow-sm">
+                    <span className="text-base leading-none">{m.emoji}</span>
+                    <span className="text-xs font-bold text-slate-700">{m.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
         <div>
           <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Heavy Rotation</h3>
           <div className="grid grid-cols-3 gap-3">
@@ -778,9 +943,6 @@ export default function Home() {
                         {f.label}
                     </button>
                 ))}
-                <button onClick={() => alert("Create New Shelf: Feature Coming Soon!")} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 text-slate-400 border border-slate-200 hover:bg-slate-200 shrink-0">
-                    <Plus size={16} strokeWidth={3} />
-                </button>
             </div>
 
             <input type="text" placeholder="Search..." className="w-full bg-white border border-slate-200 rounded-2xl pl-4 pr-4 py-4 mb-4" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -867,6 +1029,7 @@ export default function Home() {
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
             <h1 className="text-4xl font-extrabold tracking-tight pt-4 mb-6">Activity</h1>
             <ReadingChart data={chartData} />
+            <div className="mb-6"><StreakCard current={streak.current} longest={streak.longest} readerName={activeReader} /></div>
             <div className="space-y-4 mb-8">
                 <button onClick={() => { setEditingGoalType('daily'); setGoalModalOpen(true); }} className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isDailyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}>
                     <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isDailyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Daily Goal</p><p className="text-xl font-bold">{isDailyGoalMet ? 'Goal Achieved! ✨' : `${stats.goals.daily - stats.dailyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-lg ${isDailyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.dailyCount}/{stats.goals.daily}</p></div>
@@ -990,9 +1153,17 @@ export default function Home() {
     <DiscoverModal 
         isOpen={isDiscoverOpen} 
         onClose={() => setDiscoverOpen(false)} 
-        onAddBook={handleDiscoverAdd} 
+        onAddBook={handleDiscoverAdd}
         userId={session?.user?.id}
     />
+    {milestoneToast && <MilestoneToast milestone={milestoneToast} onDone={() => setMilestoneToast(null)} />}
+    {toast && (
+      <div className="fixed inset-x-0 bottom-28 z-[125] flex justify-center px-4 pointer-events-none">
+        <div className="pointer-events-auto bg-slate-900 text-white text-sm font-bold rounded-2xl px-5 py-3 shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-200">
+          {toast}
+        </div>
+      </div>
+    )}
     </>
   );
 };
