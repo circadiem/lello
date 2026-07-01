@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag } from 'lucide-react';
+import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag, BookMarked } from 'lucide-react';
 
 // ISO <-> yyyy-MM-dd for <input type="date">, anchoring rebuilt timestamps at
 // local noon so a date edit never shifts across a timezone boundary.
-const isoToDateInput = (iso?: string) => {
+const isoToDateInput = (iso?: string | null) => {
   if (!iso) return '';
   const d = new Date(iso);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -13,6 +13,14 @@ const isoToDateInput = (iso?: string) => {
 const dateInputToIso = (s: string) => {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d, 12, 0, 0).toISOString();
+};
+// Inclusive whole-day count between two ISO timestamps (day 1 = same day).
+const daysBetween = (aIso?: string | null, bIso?: string | null) => {
+  if (!aIso || !bIso) return 0;
+  const a = new Date(aIso); const b = new Date(bIso);
+  const a0 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+  const b0 = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((b0.getTime() - a0.getTime()) / 86400000) + 1;
 };
 
 /* ... (Interfaces remain the same) ... */
@@ -39,6 +47,12 @@ interface HistoryItem {
   reader: string;
   timestamp: string;
   notes?: string;
+  started_at?: string | null;
+}
+
+interface ActiveReading {
+  id: string | number;
+  started_at?: string | null;
 }
 
 interface BookDetailModalProps {
@@ -55,12 +69,18 @@ interface BookDetailModalProps {
   onUpdateShelves: (id: string | number, shelves: string[]) => void;
   onUpdateLogDate: (id: string | number, iso: string) => void;
   allShelves?: string[];
+  activeReader?: string;
+  activeReading?: ActiveReading | null;
+  onStartReading?: (book: { title: string; author: string }, startIso: string) => void;
+  onFinishReading?: (logId: string | number, finishIso: string) => void;
+  onCancelReading?: (logId: string | number) => void;
 }
 
 export default function BookDetailModal({
     book, history, onClose, onReadAgain, onRemove, onDeleteAsset,
     onUpdateStatus, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves,
-    onUpdateLogDate, allShelves = []
+    onUpdateLogDate, allShelves = [],
+    activeReader, activeReading, onStartReading, onFinishReading, onCancelReading
 }: BookDetailModalProps) {
 
     const [memo, setMemo] = useState(book?.memo || '');
@@ -68,6 +88,9 @@ export default function BookDetailModal({
     const [hoverRating, setHoverRating] = useState(0);
     const [shelves, setShelves] = useState<string[]>(book?.shelves || []);
     const [newShelf, setNewShelf] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [finishDate, setFinishDate] = useState('');
+    const [showStart, setShowStart] = useState(false);
 
     useEffect(() => {
         if (book) {
@@ -75,6 +98,10 @@ export default function BookDetailModal({
             setRating(book.rating || 0);
             setShelves(book.shelves || []);
             setNewShelf('');
+            const today = isoToDateInput(new Date().toISOString());
+            setStartDate(today);
+            setFinishDate(today);
+            setShowStart(false);
         }
     }, [book]);
 
@@ -212,6 +239,64 @@ export default function BookDetailModal({
                             </div>
                         </div>
 
+                        {/* Chapter book: start → finish tracking */}
+                        {(onStartReading || activeReading) && (
+                            <div className="mb-6">
+                                {activeReading ? (
+                                    <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl">
+                                        <div className="flex items-center gap-2 mb-1 text-amber-700 font-bold text-sm">
+                                            <BookMarked size={16} /> Currently reading{activeReader ? ` · ${activeReader}` : ''}
+                                        </div>
+                                        <p className="text-xs text-slate-600 mb-3">
+                                            Started {activeReading.started_at ? new Date(activeReading.started_at).toLocaleDateString() : ''} · day {daysBetween(activeReading.started_at, new Date().toISOString())}
+                                        </p>
+                                        <div className="flex gap-2 items-center">
+                                            <input
+                                                type="date"
+                                                value={finishDate}
+                                                min={isoToDateInput(activeReading.started_at)}
+                                                max={isoToDateInput(new Date().toISOString())}
+                                                onChange={(e) => setFinishDate(e.target.value)}
+                                                className="flex-1 bg-white border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 focus:outline-none"
+                                            />
+                                            <button
+                                                onClick={() => finishDate && onFinishReading?.(activeReading.id, dateInputToIso(finishDate))}
+                                                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold active:scale-95 transition-transform"
+                                            >
+                                                Finish
+                                            </button>
+                                        </div>
+                                        <button onClick={() => onCancelReading?.(activeReading.id)} className="mt-2 text-xs font-bold text-slate-400 hover:text-rose-500">
+                                            Cancel tracking
+                                        </button>
+                                    </div>
+                                ) : showStart ? (
+                                    <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Start date</label>
+                                        <div className="flex gap-2 items-center">
+                                            <input
+                                                type="date"
+                                                value={startDate}
+                                                max={isoToDateInput(new Date().toISOString())}
+                                                onChange={(e) => setStartDate(e.target.value)}
+                                                className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 focus:outline-none"
+                                            />
+                                            <button
+                                                onClick={() => { if (startDate && onStartReading) { onStartReading({ title: book.title, author: book.author }, dateInputToIso(startDate)); setShowStart(false); } }}
+                                                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold active:scale-95 transition-transform"
+                                            >
+                                                Start
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <button onClick={() => setShowStart(true)} className="w-full py-3 rounded-2xl bg-amber-50 text-amber-700 border border-amber-100 font-bold text-sm flex items-center justify-center gap-2 hover:bg-amber-100 transition-colors">
+                                        <BookMarked size={16} /> Start as chapter book
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
                         {/* STARS */}
                         <div className="flex items-center justify-center mb-8">
                             <div className="flex gap-1">
@@ -330,6 +415,9 @@ export default function BookDetailModal({
                                                         className="text-sm font-bold text-slate-900 bg-transparent border-0 p-0 focus:outline-none cursor-pointer"
                                                         aria-label="Date read"
                                                     />
+                                                    {log.started_at && (
+                                                        <p className="text-[11px] font-bold text-amber-600">Read over {daysBetween(log.started_at, log.timestamp)} days</p>
+                                                    )}
                                                     {log.notes && <p className="text-xs text-slate-500 italic">"{log.notes}"</p>}
                                                 </div>
                                             </div>

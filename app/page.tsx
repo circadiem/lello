@@ -5,7 +5,7 @@ import {
     ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
     Check, Settings, Trash2, UserPlus, LogOut, Activity,
     BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
-    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star, Clock, Wand2
+    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star, Clock, Wand2, BookMarked
   } from 'lucide-react';
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
@@ -56,9 +56,10 @@ interface ReadingLog {
   book_title: string;
   book_author: string;
   reader_name: string;
-  timestamp: string;
-  count?: number; 
-  notes?: string; 
+  timestamp: string;        // null while a chapter book is in progress
+  count?: number;
+  notes?: string;
+  started_at?: string | null; // set for chapter books (start date)
 }
 
 interface DisplayItem {
@@ -126,9 +127,18 @@ const getLastName = (fullName: string) => {
 };
 
 const getAvatarUrl = (name: string, map: Record<string, string>) => {
-    if (!name) return 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback'; 
+    if (!name) return 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback';
     if (map[name]) return `/avatars/${map[name]}`;
     return `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`;
+};
+
+// Inclusive whole-day count between two ISO timestamps (day 1 = same day).
+const daysBetween = (aIso?: string | null, bIso?: string | null) => {
+    if (!aIso || !bIso) return 0;
+    const a = new Date(aIso); const b = new Date(bIso);
+    const a0 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
+    const b0 = new Date(b.getFullYear(), b.getMonth(), b.getDate());
+    return Math.round((b0.getTime() - a0.getTime()) / 86400000) + 1;
 };
 
 const LandingPage = () => {
@@ -332,11 +342,16 @@ export default function Home() {
 
   const stats = useMemo(() => {
     const readerLog = logs.filter(item => item.reader_name === activeReader);
+    // Completed reads have a timestamp; chapter books still in progress
+    // (started_at set, timestamp null) are tracked separately and must not
+    // inflate counts/streaks/history.
+    const completed = readerLog.filter(item => item.timestamp);
+    const currentlyReading = readerLog.filter(item => item.started_at && !item.timestamp);
     const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
-    const dailyCount = readerLog.filter(item => isToday(item.timestamp)).length; 
-    const weeklyCount = readerLog.filter(item => isThisWeek(item.timestamp)).length;
-    const lifetimeCount = readerLog.length;
-    return { dailyCount, weeklyCount, lifetimeCount, readerLog, goals: currentGoals };
+    const dailyCount = completed.filter(item => isToday(item.timestamp)).length;
+    const weeklyCount = completed.filter(item => isThisWeek(item.timestamp)).length;
+    const lifetimeCount = completed.length;
+    return { dailyCount, weeklyCount, lifetimeCount, readerLog, completed, currentlyReading, goals: currentGoals };
   }, [logs, activeReader, readerGoals]);
 
   // Reading streak for the active reader: consecutive calendar days with at
@@ -344,7 +359,7 @@ export default function Home() {
   // they read yesterday but not yet today); `longest` is their all-time best.
   const streak = useMemo(() => {
     const keyFor = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    const dayKeys = new Set(stats.readerLog.map(l => keyFor(new Date(l.timestamp))));
+    const dayKeys = new Set(stats.completed.map(l => keyFor(new Date(l.timestamp))));
 
     let current = 0;
     const cursor = new Date();
@@ -372,7 +387,7 @@ export default function Home() {
       prev = d;
     }
     return { current, longest };
-  }, [stats.readerLog]);
+  }, [stats.completed]);
 
   // Milestone unlocks. Progress is kept in localStorage per (user, reader) so
   // each badge only celebrates once. The first computation for a reader this
@@ -419,7 +434,7 @@ export default function Home() {
           const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
           let count = 0;
           if (d <= now) {
-              count = logs.filter(item => { const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length;
+              count = logs.filter(item => { if (!item.timestamp) return false; const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length;
           }
           days.push({ day: dayName, count, isToday: d.getDate() === now.getDate() && d.getMonth() === now.getMonth() }); 
       } 
@@ -428,7 +443,7 @@ export default function Home() {
 
   const groupedHistory = useMemo(() => { 
       const groups: { today: any[], yesterday: any[], week: any[], older: any[] } = { today: [], yesterday: [], week: [], older: [] };
-      const sortedLog = [...stats.readerLog].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      const sortedLog = [...stats.completed].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       const aggregated: Record<string, any> = {};
       
       sortedLog.forEach(item => {
@@ -459,7 +474,7 @@ export default function Home() {
           else groups.older.push(item);
       });
       return groups;
-  }, [stats.readerLog, library]); // Removed getBookCover from dependencies as it's a function
+  }, [stats.completed, library]); // Removed getBookCover from dependencies as it's a function
 
   // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {
@@ -757,6 +772,46 @@ export default function Home() {
       if (error) showToast("Couldn't update the date. Please try again.");
   };
 
+  // --- Chapter books ("Currently Reading") ---
+  const handleStartReading = async (book: { title: string; author: string }, startIso: string) => {
+      if (!session) return;
+      const tempId = `temp-${Date.now()}`;
+      const optimistic: ReadingLog = {
+          id: tempId, user_id: session.user.id,
+          book_title: book.title, book_author: book.author,
+          reader_name: activeReader, timestamp: null as any, started_at: startIso,
+      };
+      setLogs(prev => [optimistic, ...prev]);
+      const { data, error } = await supabase.from('reading_logs').insert({
+          user_id: session.user.id, book_title: book.title, book_author: book.author,
+          reader_name: activeReader, started_at: startIso, timestamp: null,
+      }).select().single();
+      if (data) {
+          setLogs(prev => prev.map(l => l.id === tempId ? (data as ReadingLog) : l));
+          showToast(`Started "${book.title}".`);
+      } else if (error) {
+          setLogs(prev => prev.filter(l => l.id !== tempId));
+          showToast("Couldn't start that book. Please try again.");
+      }
+  };
+
+  const handleFinishReading = async (logId: string | number, finishIso: string) => {
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: finishIso } : l));
+      const { error } = await supabase.from('reading_logs').update({ timestamp: finishIso }).eq('id', logId);
+      if (error) {
+          setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: null as any } : l));
+          showToast("Couldn't finish that book. Please try again.");
+      } else {
+          showToast('Nice — book finished! 🎉');
+      }
+  };
+
+  const handleCancelReading = async (logId: string | number) => {
+      if (!confirm('Stop tracking this chapter book? This removes the in-progress entry.')) return;
+      setLogs(prev => prev.filter(l => l.id !== logId));
+      await supabase.from('reading_logs').delete().eq('id', logId);
+  };
+
   const handleDiscoverAdd = async (title: string, author: string, status: 'owned' | 'wishlist') => {
       if (!session) return;
       const isWishlist = status === 'wishlist';
@@ -826,12 +881,20 @@ export default function Home() {
       setTimeout(() => setCopied(false), 2000);
   };
 
-  const selectedBookHistory = useMemo(() => { 
-      if (!selectedBook) return []; 
-      return logs.filter(l => l.book_title === selectedBook.title).map(l => ({ 
-            id: l.id, title: l.book_title, author: l.book_author, reader: l.reader_name, timestamp: l.timestamp, notes: l.notes 
-        } as any)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); 
+  const selectedBookHistory = useMemo(() => {
+      if (!selectedBook) return [];
+      // Only completed reads appear in history; in-progress chapter books show
+      // in the "Currently reading" control instead.
+      return logs.filter(l => l.book_title === selectedBook.title && l.timestamp).map(l => ({
+            id: l.id, title: l.book_title, author: l.book_author, reader: l.reader_name, timestamp: l.timestamp, notes: l.notes, started_at: l.started_at
+        } as any)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [selectedBook, logs]);
+
+  // The active reader's in-progress chapter book for the open title (if any).
+  const selectedBookActiveReading = useMemo(() => {
+      if (!selectedBook) return null;
+      return logs.find(l => l.book_title === selectedBook.title && l.reader_name === activeReader && l.started_at && !l.timestamp) || null;
+  }, [selectedBook, logs, activeReader]);
 
   // --- RENDER FUNCTIONS ---
   
@@ -897,10 +960,44 @@ export default function Home() {
             </div>
           );
         })()}
+        {stats.currentlyReading.length > 0 && (
+          <div>
+            <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Currently Reading</h3>
+            <div className="space-y-3">
+              {stats.currentlyReading.map((l) => {
+                const lib = library.find(b => b.title === l.book_title);
+                const cover = getBookCover(l.book_title);
+                const day = daysBetween(l.started_at, new Date().toISOString());
+                return (
+                  <div key={l.id} className="bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center gap-4 shadow-sm">
+                    <button
+                      onClick={() => lib && setSelectedBook({ ...lib, cover: lib.cover_url || undefined, ownershipStatus: lib.ownership_status, inWishlist: lib.in_wishlist, rating: lib.rating, memo: lib.memo || undefined, shelves: lib.shelves })}
+                      className="flex items-center gap-4 flex-1 text-left min-w-0"
+                    >
+                      <div className="w-12 h-16 rounded-xl bg-amber-100 overflow-hidden flex items-center justify-center text-amber-500 shrink-0 border border-amber-200">
+                        {cover ? <img src={cover} className="w-full h-full object-cover" /> : <BookMarked size={18} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-900 line-clamp-1">{l.book_title}</p>
+                        <p className="text-xs text-amber-600 font-bold">Day {day} · since {l.started_at ? new Date(l.started_at).toLocaleDateString() : ''}</p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => handleFinishReading(l.id, new Date().toISOString())}
+                      className="px-4 py-2.5 rounded-full bg-slate-900 text-white text-xs font-bold active:scale-95 transition-transform shrink-0"
+                    >
+                      Finish
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div>
           <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Heavy Rotation</h3>
           <div className="grid grid-cols-3 gap-3">
-             {Object.values(stats.readerLog.reduce((acc: any, item) => {
+             {Object.values(stats.completed.reduce((acc: any, item) => {
                  const key = item.book_title;
                  if (!acc[key]) {
                      acc[key] = { 
@@ -919,7 +1016,7 @@ export default function Home() {
                  <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">{item.count}</div>
                </button>
              ))}
-             {stats.readerLog.length === 0 && (<div className="col-span-3 py-8 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 text-xs font-bold">No reading history yet.</div>)}
+             {stats.completed.length === 0 && (<div className="col-span-3 py-8 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 text-xs font-bold">No reading history yet.</div>)}
           </div>
         </div>
       </section>
@@ -1203,6 +1300,11 @@ export default function Home() {
         onUpdateShelves={handleUpdateShelves}
         onUpdateLogDate={handleUpdateLogDate}
         allShelves={uniqueShelves}
+        activeReader={activeReader}
+        activeReading={selectedBookActiveReading}
+        onStartReading={handleStartReading}
+        onFinishReading={handleFinishReading}
+        onCancelReading={handleCancelReading}
     />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
     <PinModal
