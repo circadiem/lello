@@ -111,7 +111,7 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
               {displayName}'s Library
             </h1>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-              Wishlist Registry
+              Wish List
             </p>
           </div>
         </div>

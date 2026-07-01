@@ -156,7 +156,7 @@ export default function DiscoverModal({ isOpen, onClose, onAddBook, userId }: Di
                                                     + Library
                                                 </button>
                                                 <button onClick={() => handleQuickAdd(i, 'wishlist')} className="flex-1 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-indigo-600 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1">
-                                                    <Gift size={14} /> Wishlist
+                                                    <Gift size={14} /> Wish List
                                                 </button>
                                             </>
                                         )}

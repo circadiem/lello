@@ -537,12 +537,12 @@ export default function Home() {
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
   // --- FIXED: ADD BOOK LOGIC (Optimistic Updates) ---
-  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => {
-    setAddModalOpen(false); 
+  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string) => {
+    setAddModalOpen(false);
     if (!session) return;
-    
+
     const isWishlist = status === 'wishlist';
-    const timestamp = new Date().toISOString();
+    const timestamp = readDateIso || new Date().toISOString();
     // Use a temp ID for optimistic UI
     const tempId = `temp-${Date.now()}`;
 
@@ -750,6 +750,13 @@ export default function Home() {
       }
   };
 
+  const handleUpdateLogDate = async (id: string | number, iso: string) => {
+      // Backdate (or correct) when a book was read.
+      setLogs(prev => prev.map(l => l.id === id ? { ...l, timestamp: iso } : l));
+      const { error } = await supabase.from('reading_logs').update({ timestamp: iso }).eq('id', id);
+      if (error) showToast("Couldn't update the date. Please try again.");
+  };
+
   const handleDiscoverAdd = async (title: string, author: string, status: 'owned' | 'wishlist') => {
       if (!session) return;
       const isWishlist = status === 'wishlist';
@@ -922,7 +929,7 @@ export default function Home() {
   const renderLibraryView = () => {
     const filters = [
         { id: 'owned', label: 'Library' },
-        { id: 'wishlist', label: 'Registry' },
+        { id: 'wishlist', label: 'Wish List' },
         { id: 'borrowed', label: 'Borrowed' },
         ...uniqueShelves.map(s => ({ id: s, label: s }))
     ];
@@ -1194,6 +1201,7 @@ export default function Home() {
         onUpdateRating={handleUpdateRating} 
         onUpdateMemo={handleUpdateMemo}
         onUpdateShelves={handleUpdateShelves}
+        onUpdateLogDate={handleUpdateLogDate}
         allShelves={uniqueShelves}
     />
     <GoalAdjustmentModal isOpen={isGoalModalOpen} onClose={() => setGoalModalOpen(false)} type={editingGoalType} currentGoal={readerGoals[activeReader]?.[editingGoalType] || 3} onSave={handleGoalSave} />
