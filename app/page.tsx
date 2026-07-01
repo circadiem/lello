@@ -793,10 +793,7 @@ export default function Home() {
       } else if (error) {
           console.error('Start reading error:', error);
           setLogs(prev => prev.filter(l => l.id !== tempId));
-          const needsMigration = /started_at|column/i.test(error.message || '');
-          showToast(needsMigration
-              ? 'Run the chapter-books migration (started_at) in Supabase first.'
-              : "Couldn't start that book. Please try again.");
+          showToast(error.message ? `Couldn't start: ${error.message}` : "Couldn't start that book. Please try again.");
       }
   };
 
