@@ -754,15 +754,16 @@ export default function Home() {
   };
 
   const handleUpdateShelves = async (id: string | number, newShelves: string[]) => {
-      if (!selectedBook) return; 
-      const libBook = library.find(b => b.title === selectedBook.title);
-      if (libBook) {
-          // Optimistic
-          setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, shelves: newShelves } : b));
-          setSelectedBook(prev => prev ? { ...prev, shelves: newShelves } : null);
-          // DB
-          await supabase.from('library').update({ shelves: newShelves }).eq('id', libBook.id);
-      }
+      // Resolve the library row by id (opened from Library) or by title (opened
+      // from a log-derived card, where the id is a log id, not a library id).
+      const libBook = library.find(b => b.id === id) || (selectedBook ? library.find(b => b.title === selectedBook.title) : undefined);
+      if (!libBook) { showToast("Couldn't find that book to update its shelves."); return; }
+      // Optimistic
+      setLibrary(prev => prev.map(b => b.id === libBook.id ? { ...b, shelves: newShelves } : b));
+      setSelectedBook(prev => prev ? { ...prev, shelves: newShelves } : prev);
+      // DB
+      const { error } = await supabase.from('library').update({ shelves: newShelves }).eq('id', libBook.id);
+      if (error) { console.error('Shelf update error:', error); showToast("Couldn't save that shelf. Please try again."); }
   };
 
   const handleUpdateLogDate = async (id: string | number, iso: string) => {
@@ -790,9 +791,19 @@ export default function Home() {
           setLogs(prev => prev.map(l => l.id === tempId ? (data as ReadingLog) : l));
           showToast(`Started "${book.title}".`);
       } else if (error) {
+          console.error('Start reading error:', error);
           setLogs(prev => prev.filter(l => l.id !== tempId));
-          showToast("Couldn't start that book. Please try again.");
+          const needsMigration = /started_at|column/i.test(error.message || '');
+          showToast(needsMigration
+              ? 'Run the chapter-books migration (started_at) in Supabase first.'
+              : "Couldn't start that book. Please try again.");
       }
+  };
+
+  const handleUpdateStartDate = async (logId: string | number, iso: string) => {
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, started_at: iso } : l));
+      const { error } = await supabase.from('reading_logs').update({ started_at: iso }).eq('id', logId);
+      if (error) showToast("Couldn't update the start date.");
   };
 
   const handleFinishReading = async (logId: string | number, finishIso: string) => {
@@ -1303,6 +1314,7 @@ export default function Home() {
         activeReader={activeReader}
         activeReading={selectedBookActiveReading}
         onStartReading={handleStartReading}
+        onUpdateStartDate={handleUpdateStartDate}
         onFinishReading={handleFinishReading}
         onCancelReading={handleCancelReading}
     />
