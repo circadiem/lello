@@ -3,6 +3,18 @@
 import React, { useState, useEffect } from 'react';
 import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag } from 'lucide-react';
 
+// ISO <-> yyyy-MM-dd for <input type="date">, anchoring rebuilt timestamps at
+// local noon so a date edit never shifts across a timezone boundary.
+const isoToDateInput = (iso?: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const dateInputToIso = (s: string) => {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toISOString();
+};
+
 /* ... (Interfaces remain the same) ... */
 interface DisplayItem {
   id: string | number;
@@ -41,13 +53,14 @@ interface BookDetailModalProps {
   onUpdateRating: (id: string, rating: number) => void;
   onUpdateMemo: (id: string, memo: string) => void;
   onUpdateShelves: (id: string | number, shelves: string[]) => void;
+  onUpdateLogDate: (id: string | number, iso: string) => void;
   allShelves?: string[];
 }
 
 export default function BookDetailModal({
     book, history, onClose, onReadAgain, onRemove, onDeleteAsset,
     onUpdateStatus, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves,
-    allShelves = []
+    onUpdateLogDate, allShelves = []
 }: BookDetailModalProps) {
 
     const [memo, setMemo] = useState(book?.memo || '');
@@ -231,7 +244,7 @@ export default function BookDetailModal({
                                 className={`w-full mb-8 py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-colors ${book.inWishlist ? 'bg-rose-100 text-rose-600 border border-rose-200 hover:bg-rose-200' : 'bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100'}`}
                             >
                                 <Gift size={18} />
-                                {book.inWishlist ? 'Remove from Registry' : 'Add to Registry'}
+                                {book.inWishlist ? 'Remove from Wish List' : 'Add to Wish List'}
                             </button>
                         )}
                         
@@ -309,7 +322,14 @@ export default function BookDetailModal({
                                                     {log.reader?.charAt(0) || 'R'}
                                                 </div>
                                                 <div>
-                                                    <p className="text-sm font-bold text-slate-900">{new Date(log.timestamp).toLocaleDateString()}</p>
+                                                    <input
+                                                        type="date"
+                                                        value={isoToDateInput(log.timestamp)}
+                                                        max={isoToDateInput(new Date().toISOString())}
+                                                        onChange={(e) => e.target.value && onUpdateLogDate(log.id, dateInputToIso(e.target.value))}
+                                                        className="text-sm font-bold text-slate-900 bg-transparent border-0 p-0 focus:outline-none cursor-pointer"
+                                                        aria-label="Date read"
+                                                    />
                                                     {log.notes && <p className="text-xs text-slate-500 italic">"{log.notes}"</p>}
                                                 </div>
                                             </div>

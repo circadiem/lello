@@ -1,7 +1,18 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Star, Library } from 'lucide-react';
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Star, Library, Clock } from 'lucide-react';
+
+// Local yyyy-MM-dd for <input type="date"> and conversion back to an ISO
+// timestamp anchored at local noon (avoids a timezone day-shift).
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const dateInputToIso = (s: string) => {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toISOString();
+};
 
 export interface GoogleBook {
   id: string; 
@@ -18,7 +29,7 @@ export interface GoogleBook {
 interface AddBookModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'wishlist', shouldLog: boolean, note: string) => void;
+  onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso: string) => void;
   readers: string[];
   activeReader: string;
   initialQuery?: string;
@@ -33,9 +44,10 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   
   const [selectedBook, setSelectedBook] = useState<GoogleBook | null>(null);
   const [selectedReaders, setSelectedReaders] = useState<string[]>([activeReader]);
-  const [ownershipStatus, setOwnershipStatus] = useState<'owned' | 'wishlist'>('owned');
+  const [ownershipStatus, setOwnershipStatus] = useState<'owned' | 'borrowed' | 'wishlist'>('owned');
   const [logSession, setLogSession] = useState(true);
   const [note, setNote] = useState('');
+  const [logDate, setLogDate] = useState(todayStr());
   const [showAllResults, setShowAllResults] = useState(false);
 
   useEffect(() => {
@@ -47,6 +59,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         setError(null);
         setLogSession(true);
         setNote('');
+        setLogDate(todayStr());
         setShowAllResults(false);
         setOwnershipStatus('owned');
         if (activeReader && activeReader !== 'Parents') {
@@ -117,7 +130,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
   const handleFinalAdd = () => {
       if (selectedBook) {
-          onAdd(selectedBook, selectedReaders, ownershipStatus, logSession, note);
+          onAdd(selectedBook, selectedReaders, ownershipStatus, logSession, note, dateInputToIso(logDate));
       }
   };
 
@@ -242,17 +255,23 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
             
             {/* Ownership Toggle */}
             <div className="flex p-1 bg-slate-100 rounded-2xl">
-                <button 
-                    onClick={() => setOwnershipStatus('owned')} 
-                    className={`flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${!isWishlist ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                <button
+                    onClick={() => setOwnershipStatus('owned')}
+                    className={`flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${ownershipStatus === 'owned' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                    <Library size={16} /> Owned
+                    <Library size={15} /> Owned
                 </button>
-                <button 
-                    onClick={() => setOwnershipStatus('wishlist')} 
-                    className={`flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${isWishlist ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400 hover:text-slate-600'}`}
+                <button
+                    onClick={() => setOwnershipStatus('borrowed')}
+                    className={`flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${ownershipStatus === 'borrowed' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                    <Gift size={16} /> Registry
+                    <Clock size={15} /> Borrowed
+                </button>
+                <button
+                    onClick={() => setOwnershipStatus('wishlist')}
+                    className={`flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${ownershipStatus === 'wishlist' ? 'bg-white shadow-sm text-rose-600' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                    <Gift size={15} /> Wish List
                 </button>
             </div>
 
@@ -285,6 +304,19 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                     </label>
 
                     {logSession && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Date read</label>
+                            <input
+                                type="date"
+                                value={logDate}
+                                max={todayStr()}
+                                onChange={(e) => setLogDate(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900"
+                            />
+                        </div>
+                    )}
+
+                    {logSession && (
                         <div className="relative">
                             <MessageSquare size={16} className="absolute left-4 top-4 text-slate-400" />
                             <textarea 
@@ -304,7 +336,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                 className={`w-full py-4 rounded-2xl font-bold shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all ${isWishlist ? 'bg-rose-500 text-white shadow-rose-200' : 'bg-slate-900 text-white'}`}
             >
                 {isWishlist ? <Gift size={20} /> : <Plus size={20} strokeWidth={3} />}
-                {isWishlist ? 'Add to Registry' : 'Add to Library'}
+                {isWishlist ? 'Add to Wish List' : 'Add to Library'}
             </button>
         </div>
       );
