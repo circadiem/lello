@@ -8,6 +8,12 @@
 alter table public.reading_logs
   add column if not exists started_at timestamptz;
 
+-- A chapter book "in progress" is stored with timestamp = NULL, so the column
+-- must be nullable. Older installs may have created reading_logs with a NOT
+-- NULL timestamp; drop it (safe/idempotent — no-op if already nullable).
+alter table public.reading_logs
+  alter column "timestamp" drop not null;
+
 -- Row semantics after this migration:
 --   * Single read (picture book): started_at IS NULL, timestamp = read date.
 --   * Chapter book in progress:   started_at set,      timestamp IS NULL.
