@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, use } from 'react';
+import React, { useState, useEffect, useMemo, use } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { Gift, Check, ExternalLink, BookOpen, User, ShoppingBag } from 'lucide-react';
 
-// Params is a Promise in Next.js 15/16
+// Optional Amazon Associates tag. Set NEXT_PUBLIC_AMAZON_AFFILIATE_TAG in
+// .env.local / Vercel once your account is approved; links work fine without it.
+const AFFILIATE_TAG = process.env.NEXT_PUBLIC_AMAZON_AFFILIATE_TAG || '';
+
 export default function RegistryPage({ params }: { params: Promise<{ userId: string }> }) {
   const { userId } = use(params);
 
@@ -14,15 +17,15 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
   const [selectedBook, setSelectedBook] = useState<any>(null);
   const [giverName, setGiverName] = useState('');
   const [claiming, setClaiming] = useState(false);
+  const [occasionFilter, setOccasionFilter] = useState<string>('all');
+  // Set when the claim succeeded but the browser blocked the auto-opened
+  // tab — we then show a success view with a real tappable link instead.
+  const [claimedUrl, setClaimedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (userId) fetchRegistry(userId);
   }, [userId]);
 
-  // CHANGED: one secure RPC instead of two direct table reads.
-  // get_registry returns ONLY the child name(s) and unpurchased
-  // wishlist items — no logs, ratings, memos, or goals leak out,
-  // and RLS no longer needs to be opened up for anonymous visitors.
   const fetchRegistry = async (id: string) => {
     const { data, error } = await supabase.rpc('get_registry', {
       registry_user_id: id,
@@ -34,23 +37,72 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
       return;
     }
 
-    // data shape: { readers: string[], books: [...] }
     setProfile({ readers: data?.readers ?? [] });
     setBooks(data?.books ?? []);
     setLoading(false);
   };
 
+  // Occasion chips, derived from whatever labels the parent actually used.
+  const occasions = useMemo(() => {
+    const set = new Set<string>();
+    books.forEach(b => b.occasion && set.add(b.occasion));
+    return Array.from(set);
+  }, [books]);
+
+  const visibleBooks = useMemo(
+    () => (occasionFilter === 'all' ? books : books.filter(b => b.occasion === occasionFilter)),
+    [books, occasionFilter]
+  );
+
+  // Convert ISBN-13 (978-prefixed) to ISBN-10. For books, Amazon's /dp/
+  // product ID IS the ISBN-10, which gives a direct product-page link.
+  const isbn13to10 = (isbn13: string): string | null => {
+    const d = isbn13.replace(/[^0-9]/g, '');
+    if (d.length !== 13 || !d.startsWith('978')) return null; // 979 has no ISBN-10
+    const core = d.slice(3, 12);
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += parseInt(core[i], 10) * (10 - i);
+    const check = (11 - (sum % 11)) % 11;
+    return core + (check === 10 ? 'X' : String(check));
+  };
+
+  const withTag = (url: string): string => {
+    if (!AFFILIATE_TAG) return url;
+    return url + (url.includes('?') ? '&' : '?') + `tag=${encodeURIComponent(AFFILIATE_TAG)}`;
+  };
+
+  const amazonUrlFor = (book: any): string => {
+    const isbn = (book.isbn || '').replace(/[^0-9Xx]/g, '');
+    if (isbn) {
+      const isbn10 = isbn.length === 13 ? isbn13to10(isbn) : isbn.length === 10 ? isbn : null;
+      if (isbn10) return withTag(`https://www.amazon.com/dp/${isbn10}`); // exact edition
+      return withTag(`https://www.amazon.com/s?k=${encodeURIComponent(isbn)}&i=stripbooks`);
+    }
+    const query = `${book.title} ${book.author ?? ''}`.trim();
+    return withTag(`https://www.amazon.com/s?k=${encodeURIComponent(query)}&i=stripbooks`);
+  };
+
   const handleIntercept = (book: any) => {
     setSelectedBook(book);
     setGiverName('');
+    setClaimedUrl(null);
   };
 
-  // CHANGED: claim_gift RPC. A visitor can mark exactly one
-  // unpurchased wishlist item as bought and nothing else — they
-  // can't edit titles, ratings, or other families' rows.
+  const closeModal = () => {
+    setSelectedBook(null);
+    setClaimedUrl(null);
+  };
+
   const executePurchase = async () => {
-    if (!selectedBook) return;
+    if (!selectedBook || claiming) return;
     setClaiming(true);
+
+    // Open the tab NOW, synchronously inside the tap gesture, so popup
+    // blockers (especially iOS Safari) allow it. We point it at Amazon only
+    // after the claim succeeds; on failure we close it again. Opening after
+    // an `await` is what silently broke the redirect before.
+    const win = window.open('', '_blank');
+    const url = amazonUrlFor(selectedBook);
 
     const { data: claimed, error } = await supabase.rpc('claim_gift', {
       book_id: selectedBook.id,
@@ -59,6 +111,7 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
 
     if (error) {
       console.error('Claim error:', error);
+      win?.close();
       alert('Something went wrong claiming this gift. Please try again.');
       setClaiming(false);
       return;
@@ -66,22 +119,26 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
 
     if (claimed === false) {
       // Someone else grabbed it first — refresh so the list is honest.
+      win?.close();
       alert('Looks like someone just claimed this one! Refreshing the list.');
-      setSelectedBook(null);
+      closeModal();
       setClaiming(false);
       fetchRegistry(userId);
       return;
     }
 
-    // Success: remove locally and send the giver to Amazon.
+    // Success: remove locally, then send the giver to Amazon.
     setBooks(prev => prev.filter(b => b.id !== selectedBook.id));
-
-    const query = `${selectedBook.title} ${selectedBook.author}`;
-    const url = `https://www.amazon.com/s?k=${encodeURIComponent(query)}&i=stripbooks`;
-    window.open(url, '_blank');
-
     setClaiming(false);
-    setSelectedBook(null);
+
+    if (win) {
+      win.location.href = url;
+      closeModal();
+    } else {
+      // The browser blocked even the synchronous open — show a success view
+      // with a real link. A direct anchor tap is never popup-blocked.
+      setClaimedUrl(url);
+    }
   };
 
   if (loading)
@@ -117,20 +174,40 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
         </div>
       </div>
 
-      {/* List */}
       <main className="max-w-md mx-auto px-6 py-8 space-y-4">
-        {books.length === 0 ? (
+        {/* Occasion chips — only shown if the parent labeled any books */}
+        {occasions.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-1 px-1 no-scrollbar">
+            {['all', ...occasions].map(o => (
+              <button
+                key={o}
+                onClick={() => setOccasionFilter(o)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
+                  occasionFilter === o
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/20'
+                    : 'bg-white text-slate-500 border-slate-200'
+                }`}
+              >
+                {o === 'all' ? 'All' : o}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {visibleBooks.length === 0 ? (
           <div className="text-center py-12 px-6 bg-white rounded-3xl border border-slate-100 shadow-sm">
             <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
               <Check size={32} />
             </div>
             <h3 className="font-bold text-slate-900 mb-2">All Caught Up!</h3>
             <p className="text-sm text-slate-500">
-              Every book on the list has been purchased. Amazing!
+              {occasionFilter === 'all'
+                ? 'Every book on the list has been purchased. Amazing!'
+                : 'No books left for this occasion — try another tab.'}
             </p>
           </div>
         ) : (
-          books.map(book => (
+          visibleBooks.map(book => (
             <div
               key={book.id}
               className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-4"
@@ -148,7 +225,12 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
                   <h3 className="font-extrabold text-lg text-slate-900 leading-tight mb-1 line-clamp-2">
                     {book.title}
                   </h3>
-                  <p className="text-sm font-medium text-slate-500 mb-3">{book.author}</p>
+                  <p className="text-sm font-medium text-slate-500 mb-2">{book.author}</p>
+                  {book.occasion && (
+                    <span className="inline-block px-2.5 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-bold uppercase tracking-wide">
+                      {book.occasion}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -168,53 +250,86 @@ export default function RegistryPage({ params }: { params: Promise<{ userId: str
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 sm:p-4">
           <div
             className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setSelectedBook(null)}
+            onClick={closeModal}
           />
           <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-10 duration-300">
-            <div className="text-center mb-6">
-              <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
-                <Gift size={28} />
-              </div>
-              <h2 className="text-xl font-extrabold text-slate-900">Great Choice!</h2>
-              <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-                We'll send you to Amazon to buy <strong>{selectedBook.title}</strong>. We'll mark it
-                as "Purchased" here so no one else buys it.
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-1 block">
-                  From (Optional)
-                </label>
-                <div className="relative">
-                  <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="e.g. Nana & Papa"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-11 pr-4 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
-                    value={giverName}
-                    onChange={e => setGiverName(e.target.value)}
-                  />
+            {claimedUrl ? (
+              /* Success view — shown only if the browser blocked the auto-open */
+              <div className="text-center">
+                <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+                  <Check size={28} />
                 </div>
+                <h2 className="text-xl font-extrabold text-slate-900">Marked as Purchased!</h2>
+                <p className="text-sm text-slate-500 mt-2 mb-6 leading-relaxed">
+                  <strong>{selectedBook.title}</strong> is reserved for you. Tap below to buy it on
+                  Amazon.
+                </p>
+                <a
+                  href={claimedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-4 bg-emerald-500 text-white font-bold rounded-2xl shadow-xl shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-emerald-600"
+                >
+                  Continue to Amazon <ExternalLink size={18} />
+                </a>
+                <button
+                  onClick={closeModal}
+                  className="w-full py-3 mt-1 text-slate-400 font-bold text-xs hover:text-slate-600"
+                >
+                  Done
+                </button>
               </div>
+            ) : (
+              <>
+                <div className="text-center mb-6">
+                  <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+                    <Gift size={28} />
+                  </div>
+                  <h2 className="text-xl font-extrabold text-slate-900">Great Choice!</h2>
+                  <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+                    We'll send you to Amazon to buy <strong>{selectedBook.title}</strong>. We'll
+                    mark it as "Purchased" here so no one else buys it.
+                  </p>
+                </div>
 
-              <button
-                disabled={claiming}
-                onClick={executePurchase}
-                className="w-full py-4 bg-emerald-500 text-white font-bold rounded-2xl shadow-xl shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-emerald-600 disabled:opacity-70 disabled:pointer-events-none mt-2"
-              >
-                {claiming ? 'Processing...' : 'Confirm & Go to Amazon'}
-                {!claiming && <ExternalLink size={18} />}
-              </button>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-1 block">
+                      From (Optional)
+                    </label>
+                    <div className="relative">
+                      <User
+                        size={18}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                      <input
+                        type="text"
+                        placeholder="e.g. Nana & Papa"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-11 pr-4 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                        value={giverName}
+                        onChange={e => setGiverName(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              <button
-                onClick={() => setSelectedBook(null)}
-                className="w-full py-3 text-slate-400 font-bold text-xs hover:text-slate-600"
-              >
-                Cancel
-              </button>
-            </div>
+                  <button
+                    disabled={claiming}
+                    onClick={executePurchase}
+                    className="w-full py-4 bg-emerald-500 text-white font-bold rounded-2xl shadow-xl shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-emerald-600 disabled:opacity-70 disabled:pointer-events-none mt-2"
+                  >
+                    {claiming ? 'Processing...' : 'Confirm & Go to Amazon'}
+                    {!claiming && <ExternalLink size={18} />}
+                  </button>
+
+                  <button
+                    onClick={closeModal}
+                    className="w-full py-3 text-slate-400 font-bold text-xs hover:text-slate-600"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
