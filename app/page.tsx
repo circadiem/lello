@@ -19,6 +19,7 @@ import BarcodeScanner from '@/components/BarcodeScanner';
 import StreakCard from '@/components/StreakCard';
 import MilestoneToast, { Milestone } from '@/components/MilestoneToast';
 import MagicLogModal from '@/components/MagicLogModal';
+import YearInReview from '@/components/YearInReview';
 import { supabase } from '@/lib/supabaseClient';
 import { getStoredPin, storePin, clearStoredPin, PinRecord } from '@/lib/pin';
 
@@ -33,6 +34,9 @@ const MILESTONES: (Milestone & { test: (s: { lifetime: number; streak: number })
   { id: 'streak-30',  label: '30-day streak!',     emoji: '🚀', test: s => s.streak >= 30 },
 ];
 
+// Wish-list gifting occasions (chips on the library row + public registry).
+const OCCASIONS = ['Birthday', 'Holiday', 'Just Because'];
+
 // --- TYPES ---
 type Tab = 'library' | 'home' | 'history';
 
@@ -42,11 +46,15 @@ interface Book {
   title: string;
   author: string;
   cover_url: string | null;
-  ownership_status: 'owned' | 'borrowed'; 
-  in_wishlist: boolean;                   
-  rating: number;                         
-  memo: string | null;                    
-  shelves?: string[]; 
+  isbn?: string | null;
+  occasion?: string | null;
+  purchased_at?: string | null;
+  purchased_by?: string | null;
+  ownership_status: 'owned' | 'borrowed';
+  in_wishlist: boolean;
+  rating: number;
+  memo: string | null;
+  shelves?: string[];
   created_at?: string;
 }
 
@@ -287,6 +295,7 @@ export default function Home() {
   const [editingAvatarFor, setEditingAvatarFor] = useState<string | null>(null);
   const [isDiscoverOpen, setDiscoverOpen] = useState(false);
   const [isMagicLogOpen, setMagicLogOpen] = useState(false);
+  const [showYearReview, setShowYearReview] = useState(false);
 
   // Lightweight feedback for failed writes + milestone celebrations.
   const [toast, setToast] = useState<string | null>(null);
@@ -556,6 +565,19 @@ export default function Home() {
     setAddModalOpen(false);
     if (!session) return;
 
+    // Duplicate guard: same ISBN, or same title+author (case-insensitive).
+    const dupe = library.find(b =>
+        (book.isbn && b.isbn && b.isbn === book.isbn) ||
+        (b.title.trim().toLowerCase() === book.title.trim().toLowerCase() &&
+         (b.author || '').trim().toLowerCase() === (book.author || '').trim().toLowerCase())
+    );
+    if (dupe) {
+        const addAnyway = confirm(
+            `"${book.title}" is already in your library. Add another copy anyway?\n\n(Tip: open the book from your Library to log a read instead.)`
+        );
+        if (!addAnyway) return;
+    }
+
     const isWishlist = status === 'wishlist';
     const timestamp = readDateIso || new Date().toISOString();
     // Use a temp ID for optimistic UI
@@ -603,6 +625,7 @@ export default function Home() {
         title: book.title,
         author: book.author,
         cover_url: book.coverUrl,
+        isbn: book.isbn ?? null,
         ownership_status: isWishlist ? 'owned' : status,
         in_wishlist: isWishlist,
         rating: 0,
@@ -715,14 +738,22 @@ export default function Home() {
       await supabase.from('reading_logs').delete().eq('id', id);
   };
 
-  const handleDeleteAsset = async (title: string) => {
+  const handleDeleteAsset = async (id: string | number, title: string) => {
       if (!session) return;
       if (!confirm(`Remove "${title}" from your library?`)) return;
+      // Resolve the library row by id (opened from Library) or by title
+      // (opened from a log-derived card, where id may be a log id).
+      const libBook = library.find(b => b.id === id) || library.find(b => b.title === title);
+      const targetId = libBook?.id ?? id;
       // Optimistic Delete
-      setLibrary(prev => prev.filter(b => b.title !== title));
+      setLibrary(prev => prev.filter(b => b.id !== targetId));
       setSelectedBook(null);
-      // Background DB
-      await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id);
+      // Background DB — by id so duplicate titles are safe
+      if (libBook) {
+          await supabase.from('library').delete().eq('id', libBook.id).eq('user_id', session.user.id);
+      } else {
+          await supabase.from('library').delete().eq('title', title).eq('user_id', session.user.id);
+      }
   };
   
   const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => { 
@@ -739,6 +770,12 @@ export default function Home() {
       setSelectedBook(prev => prev ? { ...prev, inWishlist: inWishlist } : null);
       // DB
       await supabase.from('library').update({ in_wishlist: inWishlist }).eq('id', id);
+  };
+
+  const handleUpdateOccasion = async (id: string, occasion: string | null) => {
+      setLibrary(prev => prev.map(b => b.id === id ? { ...b, occasion } : b));
+      const { error } = await supabase.from('library').update({ occasion }).eq('id', id);
+      if (error) showToast("Couldn't update the occasion.");
   };
 
   const handleUpdateRating = async (id: string, rating: number) => {
@@ -931,6 +968,13 @@ export default function Home() {
                       <button onClick={handleAddChildClick} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:border-slate-400 hover:text-slate-600 transition-all active:scale-95"><UserPlus size={18} /><span>Add Child</span></button>
                   </div>
               </section>
+              <button
+                  onClick={() => setShowYearReview(true)}
+                  className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-fuchsia-600 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                  ✨ {new Date().getFullYear()} Year in Books
+              </button>
+
               <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
                   <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">System</h3>
                   <button onClick={handleChangePin} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors mb-2">Change Parent PIN</button>
@@ -1105,9 +1149,9 @@ export default function Home() {
                         <h2 className="text-sm font-extrabold text-slate-400 mb-4 px-2 sticky top-20">{letter}</h2>
                         <div className="space-y-3">
                             {groupedBooks[letter].map((book: Book) => (
-                                <button 
-                                    key={book.id || `temp-${book.title}`} 
-                                    onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status, shelves: book.shelves, inWishlist: book.in_wishlist, rating: book.rating, memo: book.memo || undefined })} 
+                              <div key={book.id || `temp-${book.title}`}>
+                                <button
+                                    onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status, shelves: book.shelves, inWishlist: book.in_wishlist, rating: book.rating, memo: book.memo || undefined })}
                                     className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform"
                                 >
                                     <div className="w-12 h-16 shrink-0 bg-slate-100 rounded-xl overflow-hidden shadow-inner flex items-center justify-center text-slate-300">
@@ -1139,6 +1183,32 @@ export default function Home() {
                                     </div>
                                     <ChevronRight size={20} className="text-slate-200 group-hover:text-slate-400" />
                                 </button>
+
+                                {/* Wishlist meta: gift status + occasion picker */}
+                                {filter === 'wishlist' && book.in_wishlist && (
+                                    <div className="flex items-center gap-2 px-3 pt-2 flex-wrap">
+                                        {book.purchased_at ? (
+                                            <span className="px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                                                🎁 Purchased{book.purchased_by ? ` by ${book.purchased_by}` : ''}
+                                            </span>
+                                        ) : (
+                                            OCCASIONS.map(o => (
+                                                <button
+                                                    key={o}
+                                                    onClick={() => handleUpdateOccasion(book.id, book.occasion === o ? null : o)}
+                                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border ${
+                                                        book.occasion === o
+                                                        ? 'bg-indigo-600 text-white border-indigo-600'
+                                                        : 'bg-white text-slate-400 border-slate-200'
+                                                    }`}
+                                                >
+                                                    {o}
+                                                </button>
+                                            ))
+                                        )}
+                                    </div>
+                                )}
+                              </div>
                             ))}
                         </div>
                     </div>
@@ -1339,6 +1409,14 @@ export default function Home() {
         readers={readers.slice(0, -1)}
         onLogged={handleMagicLogged}
     />
+    {showYearReview && (
+        <YearInReview
+            logs={logs}
+            library={library}
+            readerName={activeReader}
+            onClose={() => setShowYearReview(false)}
+        />
+    )}
     {milestoneToast && <MilestoneToast milestone={milestoneToast} onDone={() => setMilestoneToast(null)} />}
     {toast && (
       <div className="fixed inset-x-0 bottom-28 z-[125] flex justify-center px-4 pointer-events-none">

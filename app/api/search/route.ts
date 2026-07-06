@@ -70,11 +70,18 @@ export async function POST(req: Request) {
     const results = data.items.map((item: any) => {
       const info = item.volumeInfo || {};
       const img = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || null;
+      // Prefer ISBN-13, fall back to ISBN-10.
+      const ids = info.industryIdentifiers || [];
+      const isbn =
+        ids.find((x: any) => x.type === 'ISBN_13')?.identifier ||
+        ids.find((x: any) => x.type === 'ISBN_10')?.identifier ||
+        null;
       return {
         id: item.id,
         title: info.title || 'Untitled',
         author: info.authors ? info.authors[0] : 'Unknown',
         coverUrl: img ? img.replace('http:', 'https:') : null,
+        isbn,
         popularity: info.ratingsCount || 0,
         rating: info.averageRating || 0,
       };

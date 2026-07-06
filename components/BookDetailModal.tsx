@@ -61,7 +61,7 @@ interface BookDetailModalProps {
   onClose: () => void;
   onReadAgain: (book: any) => void;
   onRemove: (id: string | number) => void;
-  onDeleteAsset: (title: string) => void;
+  onDeleteAsset: (id: string | number, title: string) => void;
   onUpdateStatus: (id: string, status: 'owned' | 'borrowed') => void;
   onUpdateWishlist: (id: string, inWishlist: boolean) => void;
   onUpdateRating: (id: string, rating: number) => void;
@@ -432,7 +432,7 @@ export default function BookDetailModal({
                                 Log Another Read
                             </button>
                             
-                            <button onClick={() => { onDeleteAsset(book.title); onClose(); }} className="w-full text-red-400 text-xs font-bold hover:text-red-600 flex items-center justify-center gap-2 py-2 transition-colors">
+                            <button onClick={() => { onDeleteAsset(book.id, book.title); onClose(); }} className="w-full text-red-400 text-xs font-bold hover:text-red-600 flex items-center justify-center gap-2 py-2 transition-colors">
                                 <Trash2 size={14} /> Delete Book Asset
                             </button>
                         </div>
