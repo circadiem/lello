@@ -35,6 +35,7 @@ import ReadingChart from '@/components/ReadingChart';
 import BottomNav from '@/components/BottomNav';
 import ParentDashboard from '@/components/views/ParentDashboard';
 import HistoryView from '@/components/views/HistoryView';
+import HomeView from '@/components/views/HomeView';
 
 // --- MAIN APP ---
 export default function Home() {
@@ -723,95 +724,6 @@ export default function Home() {
 
   // --- RENDER FUNCTIONS ---
   
-  const renderHomeView = () => (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
-      <section className="flex flex-col items-center justify-center py-12">
-          {/* CHANGED: Label and Value for Lifetime Reads */}
-          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Lifetime Reads</h2>
-          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.lifetimeCount}</div>
-      </section>
-      <section className="space-y-8">
-        <StreakCard current={streak.current} longest={streak.longest} readerName={activeReader} />
-        {(() => {
-          const earned = MILESTONES.filter(m => m.test({ lifetime: stats.lifetimeCount, streak: streak.current }));
-          if (earned.length === 0) return null;
-          return (
-            <div>
-              <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Achievements</h3>
-              <div className="flex flex-wrap gap-2">
-                {earned.map(m => (
-                  <div key={m.id} className="flex items-center gap-1.5 bg-white border border-slate-100 rounded-full pl-2 pr-3 py-1.5 shadow-sm">
-                    <span className="text-base leading-none">{m.emoji}</span>
-                    <span className="text-xs font-bold text-slate-700">{m.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-        {stats.currentlyReading.length > 0 && (
-          <div>
-            <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Currently Reading</h3>
-            <div className="space-y-3">
-              {stats.currentlyReading.map((l) => {
-                const lib = library.find(b => b.title === l.book_title);
-                const cover = getBookCover(l.book_title);
-                const day = daysBetween(l.started_at, new Date().toISOString());
-                return (
-                  <div key={l.id} className="bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center gap-4 shadow-sm">
-                    <button
-                      onClick={() => lib && setSelectedBook({ ...lib, cover: lib.cover_url || undefined, ownershipStatus: lib.ownership_status, inWishlist: lib.in_wishlist, rating: lib.rating, memo: lib.memo || undefined, shelves: lib.shelves })}
-                      className="flex items-center gap-4 flex-1 text-left min-w-0"
-                    >
-                      <div className="w-12 h-16 rounded-xl bg-amber-100 overflow-hidden flex items-center justify-center text-amber-500 shrink-0 border border-amber-200">
-                        {cover ? <img src={cover} className="w-full h-full object-cover" /> : <BookMarked size={18} />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-slate-900 line-clamp-1">{l.book_title}</p>
-                        <p className="text-xs text-amber-600 font-bold">Day {day} · since {l.started_at ? new Date(l.started_at).toLocaleDateString() : ''}</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => handleFinishReading(l.id, new Date().toISOString())}
-                      className="px-4 py-2.5 rounded-full bg-slate-900 text-white text-xs font-bold active:scale-95 transition-transform shrink-0"
-                    >
-                      Finish
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        <div>
-          <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Heavy Rotation</h3>
-          <div className="grid grid-cols-3 gap-3">
-             {Object.values(stats.completed.reduce((acc: any, item) => {
-                 const key = item.book_title;
-                 if (!acc[key]) {
-                     acc[key] = { 
-                         id: item.id,
-                         title: item.book_title,
-                         author: item.book_author,
-                         count: 0, 
-                         cover: getBookCover(item.book_title) 
-                     };
-                 }
-                 acc[key].count++;
-                 return acc;
-             }, {})).sort((a: any, b: any) => b.count - a.count).slice(0, 3).map((item: any) => (
-               <button key={item.id} onClick={() => setSelectedBook(item)} className="relative aspect-[3/4] bg-slate-200 rounded-3xl overflow-hidden border border-slate-300 transition-transform active:scale-[0.98] group">
-                 {item.cover ? <img src={item.cover} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" /> : <div className="w-full h-full flex items-center justify-center text-slate-400"><BookOpen size={24} /></div>}
-                 <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">{item.count}</div>
-               </button>
-             ))}
-             {stats.completed.length === 0 && (<div className="col-span-3 py-8 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 text-xs font-bold">No reading history yet.</div>)}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-
   const renderLibraryView = () => {
     const filters = [
         { id: 'owned', label: 'Library' },
@@ -1013,7 +925,17 @@ export default function Home() {
             onLogout={handleLogout}
             onExitParentMode={() => setActiveReader(readers[0] || 'Leo')}
           />
-        ) : (activeTab === 'library' ? renderLibraryView() : activeTab === 'home' ? renderHomeView() : (
+        ) : (activeTab === 'library' ? renderLibraryView() : activeTab === 'home' ? (
+          <HomeView
+            activeReader={activeReader}
+            stats={stats}
+            streak={streak}
+            library={library}
+            getBookCover={getBookCover}
+            onSelectBook={setSelectedBook}
+            onFinishReading={handleFinishReading}
+          />
+        ) : (
           <HistoryView
             stats={stats}
             chartData={chartData}
