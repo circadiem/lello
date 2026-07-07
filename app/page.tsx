@@ -1,12 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-    ScanBarcode, Library as LibraryIcon, BookOpen, Plus, ChevronRight, 
-    Check, Settings, Trash2, UserPlus, LogOut, Activity,
-    BarChart3, StickyNote, Mail, Loader2, Edit3, TrendingUp,
-    ShieldCheck, ArrowRight, Gift, Share2, Tag, Sparkles, Star, Clock, Wand2, BookMarked
-  } from 'lucide-react';
+import { ScanBarcode, Plus, Check, Loader2, Sparkles, Wand2 } from 'lucide-react';
 import AddBookModal, { GoogleBook } from '@/components/AddBookModal';
 import BookDetailModal from '@/components/BookDetailModal';
 import GoalAdjustmentModal from '@/components/GoalAdjustmentModal';
@@ -16,245 +11,23 @@ import AvatarModal from '@/components/AvatarModal';
 import OnboardingWizard from '@/components/OnboardingWizard'; 
 import DiscoverModal from '@/components/DiscoverModal';
 import BarcodeScanner from '@/components/BarcodeScanner';
-import StreakCard from '@/components/StreakCard';
 import MilestoneToast, { Milestone } from '@/components/MilestoneToast';
 import MagicLogModal from '@/components/MagicLogModal';
 import YearInReview from '@/components/YearInReview';
 import { supabase } from '@/lib/supabaseClient';
 import { getStoredPin, storePin, clearStoredPin, PinRecord } from '@/lib/pin';
 
-// Reading milestones, celebrated once each per reader (tested against
-// lifetime read count and current streak length).
-const MILESTONES: (Milestone & { test: (s: { lifetime: number; streak: number }) => boolean })[] = [
-  { id: 'first-read', label: 'First book logged!', emoji: '📖', test: s => s.lifetime >= 1 },
-  { id: 'reads-10',   label: '10 reads',           emoji: '⭐', test: s => s.lifetime >= 10 },
-  { id: 'reads-50',   label: '50 reads',           emoji: '🌟', test: s => s.lifetime >= 50 },
-  { id: 'reads-100',  label: '100 reads!',         emoji: '🏆', test: s => s.lifetime >= 100 },
-  { id: 'streak-7',   label: '7-day streak',       emoji: '🔥', test: s => s.streak >= 7 },
-  { id: 'streak-30',  label: '30-day streak!',     emoji: '🚀', test: s => s.streak >= 30 },
-];
+import { MILESTONES } from '@/lib/constants';
+import type { Tab, Book, ReadingLog, DisplayItem } from '@/lib/types';
+import { getAvatarUrl } from '@/lib/helpers';
+import { useStats } from '@/hooks/useStats';
 
-// Wish-list gifting occasions (chips on the library row + public registry).
-const OCCASIONS = ['Birthday', 'Holiday', 'Just Because'];
-
-// --- TYPES ---
-type Tab = 'library' | 'home' | 'history';
-
-interface Book {
-  id: string;
-  user_id: string;
-  title: string;
-  author: string;
-  cover_url: string | null;
-  isbn?: string | null;
-  occasion?: string | null;
-  purchased_at?: string | null;
-  purchased_by?: string | null;
-  ownership_status: 'owned' | 'borrowed';
-  in_wishlist: boolean;
-  rating: number;
-  memo: string | null;
-  shelves?: string[];
-  created_at?: string;
-}
-
-interface ReadingLog {
-  id: string;
-  user_id: string;
-  book_title: string;
-  book_author: string;
-  reader_name: string;
-  timestamp: string;        // null while a chapter book is in progress
-  count?: number;
-  notes?: string;
-  started_at?: string | null; // set for chapter books (start date)
-}
-
-interface DisplayItem {
-  id: string | number;
-  title: string;
-  author: string;
-  cover?: string;
-  cover_url?: string | null;
-  reader?: string;
-  timestamp?: string;
-  count?: number;
-  // UI Props
-  ownershipStatus?: 'owned' | 'borrowed';
-  inWishlist?: boolean;
-  rating?: number;
-  memo?: string;
-  shelves?: string[];
-  dailyCount?: number;
-}
-
-// --- HELPERS ---
-const isToday = (isoString?: string) => {
-    if (!isoString) return false;
-    const date = new Date(isoString);
-    const today = new Date();
-    return date.getDate() === today.getDate() &&
-           date.getMonth() === today.getMonth() &&
-           date.getFullYear() === today.getFullYear();
-};
-
-const isYesterday = (isoString?: string) => {
-    if (!isoString) return false;
-    const date = new Date(isoString);
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return date.getDate() === yesterday.getDate() &&
-           date.getMonth() === yesterday.getMonth() &&
-           date.getFullYear() === yesterday.getFullYear();
-};
-
-const isEarlierThisWeek = (isoString?: string) => {
-    if (!isoString) return false;
-    if (isToday(isoString) || isYesterday(isoString)) return false;
-    const date = new Date(isoString);
-    const now = new Date();
-    const day = now.getDay(); 
-    const diff = day === 0 ? 6 : day - 1; 
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - diff);
-    monday.setHours(0,0,0,0);
-    return date >= monday && date <= now;
-};
-
-const isThisWeek = (isoString?: string) => {
-    if (!isoString) return false;
-    const date = new Date(isoString);
-    const now = new Date();
-    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    return date >= oneWeekAgo && date <= now;
-};
-
-const getLastName = (fullName: string) => {
-    const parts = fullName.trim().split(' ');
-    return parts.length > 0 ? parts[parts.length - 1] : fullName;
-};
-
-const getAvatarUrl = (name: string, map: Record<string, string>) => {
-    if (!name) return 'https://api.dicebear.com/7.x/avataaars/svg?seed=fallback';
-    if (map[name]) return `/avatars/${map[name]}`;
-    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`;
-};
-
-// Inclusive whole-day count between two ISO timestamps (day 1 = same day).
-const daysBetween = (aIso?: string | null, bIso?: string | null) => {
-    if (!aIso || !bIso) return 0;
-    const a = new Date(aIso); const b = new Date(bIso);
-    const a0 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
-    const b0 = new Date(b.getFullYear(), b.getMonth(), b.getDate());
-    return Math.round((b0.getTime() - a0.getTime()) / 86400000) + 1;
-};
-
-const LandingPage = () => {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [isSignUp, setIsSignUp] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    const handleAuth = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setError(null);
-        if (isSignUp) {
-            const { error } = await supabase.auth.signUp({ email, password });
-            if (error) setError(error.message);
-        } else {
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
-            if (error) setError(error.message);
-        }
-        setLoading(false);
-    };
-
-    return (
-        <div className="min-h-screen bg-slate-50 flex flex-col">
-            <nav className="flex justify-between items-center px-8 py-6 max-w-7xl mx-auto w-full">
-                <div className="flex items-center gap-3">
-                    <img src="/icon.png" alt="Lello Logo" className="w-10 h-10 rounded-xl shadow-sm border border-slate-100" />
-                    <span className="font-extrabold text-2xl tracking-tight text-slate-900">Lello</span>
-                </div>
-            </nav>
-            <main className="flex-1 flex flex-col items-center justify-center px-6 text-center max-w-3xl mx-auto pb-20 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-extrabold uppercase tracking-widest mb-8">
-                    <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-                    </span>
-                    Beta Access Open
-                </div>
-                <h1 className="text-5xl sm:text-7xl font-extrabold text-slate-900 tracking-tight mb-6 leading-tight">
-                    Capture every chapter <br className="hidden sm:block" />
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-500">of their childhood.</span>
-                </h1>
-                <p className="text-lg text-slate-500 font-medium mb-10 max-w-xl leading-relaxed">
-                    From their first picture book to their first novel. Track the journey, celebrate the milestones, and foster a love for learning.
-                </p>
-                <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100">
-                    <div className="flex gap-4 mb-6 p-1 bg-slate-50 rounded-xl">
-                        <button onClick={() => setIsSignUp(false)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>Log In</button>
-                        <button onClick={() => setIsSignUp(true)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isSignUp ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>Sign Up</button>
-                    </div>
-                    <form onSubmit={handleAuth} className="space-y-3">
-                        <div className="relative">
-                            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                            <input type="email" placeholder="name@example.com" className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                        </div>
-                        <div className="relative">
-                            <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                            <input type="password" placeholder="Password" className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 font-bold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-                        </div>
-                        {error && (<div className="p-3 bg-red-50 text-red-600 text-xs font-bold rounded-xl flex items-center gap-2"><Activity size={14} /> {error}</div>)}
-                        <button disabled={loading} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg shadow-slate-900/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed mt-2">
-                            {loading ? <Loader2 className="animate-spin" /> : (isSignUp ? 'Create Account' : 'Welcome Back')} 
-                            {!loading && <ArrowRight size={18} />}
-                        </button>
-                    </form>
-                </div>
-            </main>
-        </div>
-    );
-};
-
-const ReadingChart = ({ data }: { data: { day: string, count: number, isToday: boolean }[] }) => {
-    const max = Math.max(...data.map(d => d.count), 4); 
-    return (
-        <div className="w-full h-56 bg-slate-900 rounded-[2.5rem] p-6 flex flex-col justify-between shadow-xl mb-8 overflow-hidden">
-            <div className="flex justify-between items-start mb-4">
-                <div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">This Week</p>
-                    <p className="text-white font-bold text-xl">Weekly Count</p>
-                </div>
-                <div className="p-2 bg-slate-800 rounded-full text-emerald-400">
-                    <BarChart3 size={20} />
-                </div>
-            </div>
-            <div className="flex items-end justify-between gap-2 h-full pb-2 px-2">
-                {data.map((item, i) => (
-                    <div key={i} className="flex flex-col items-center gap-2 flex-1">
-                        <div className="w-full relative group flex items-end justify-center h-24">
-                            <div 
-                                style={{ height: `${(item.count / max) * 100}%` }} 
-                                className={`w-full max-w-[12px] rounded-full transition-all duration-500 min-h-[4px] ${item.isToday ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]' : 'bg-slate-700 group-hover:bg-slate-600'}`} 
-                            />
-                            {item.count > 0 && (
-                                <div className="absolute -top-8 bg-white text-slate-900 text-[10px] font-bold px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-md">
-                                    {item.count}
-                                </div>
-                            )}
-                        </div>
-                        <span className={`text-[9px] font-bold uppercase tracking-wider ${item.isToday ? 'text-white' : 'text-slate-500'}`}>
-                            {item.day}
-                        </span>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
+import LandingPage from '@/components/LandingPage';
+import BottomNav from '@/components/BottomNav';
+import ParentDashboard from '@/components/views/ParentDashboard';
+import HistoryView from '@/components/views/HistoryView';
+import HomeView from '@/components/views/HomeView';
+import LibraryView from '@/components/views/LibraryView';
 
 // --- MAIN APP ---
 export default function Home() {
@@ -273,11 +46,6 @@ export default function Home() {
 
   const [library, setLibrary] = useState<Book[]>([]); 
   const [logs, setLogs] = useState<ReadingLog[]>([]);       
-
-  // UI State
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('owned'); 
-  const [copied, setCopied] = useState(false);
 
   // Modals
   const [isAddModalOpen, setAddModalOpen] = useState(false);
@@ -349,54 +117,7 @@ export default function Home() {
       return fuzzy ? fuzzy.cover_url : null;
   };
 
-  const stats = useMemo(() => {
-    const readerLog = logs.filter(item => item.reader_name === activeReader);
-    // Completed reads have a timestamp; chapter books still in progress
-    // (started_at set, timestamp null) are tracked separately and must not
-    // inflate counts/streaks/history.
-    const completed = readerLog.filter(item => item.timestamp);
-    const currentlyReading = readerLog.filter(item => item.started_at && !item.timestamp);
-    const currentGoals = readerGoals[activeReader] || readerGoals['default'] || { daily: 2, weekly: 10 };
-    const dailyCount = completed.filter(item => isToday(item.timestamp)).length;
-    const weeklyCount = completed.filter(item => isThisWeek(item.timestamp)).length;
-    const lifetimeCount = completed.length;
-    return { dailyCount, weeklyCount, lifetimeCount, readerLog, completed, currentlyReading, goals: currentGoals };
-  }, [logs, activeReader, readerGoals]);
-
-  // Reading streak for the active reader: consecutive calendar days with at
-  // least one logged read. `current` counts back from today (still "alive" if
-  // they read yesterday but not yet today); `longest` is their all-time best.
-  const streak = useMemo(() => {
-    const keyFor = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    const dayKeys = new Set(stats.completed.map(l => keyFor(new Date(l.timestamp))));
-
-    let current = 0;
-    const cursor = new Date();
-    if (!dayKeys.has(keyFor(cursor))) cursor.setDate(cursor.getDate() - 1);
-    while (dayKeys.has(keyFor(cursor))) {
-      current++;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-
-    // Longest run, stepping day-by-day (DST-safe) over the sorted unique days.
-    const days = Array.from(dayKeys)
-      .map(k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m, d); })
-      .sort((a, b) => a.getTime() - b.getTime());
-    let longest = 0, run = 0;
-    let prev: Date | null = null;
-    for (const d of days) {
-      if (prev) {
-        const next = new Date(prev);
-        next.setDate(next.getDate() + 1);
-        run = keyFor(next) === keyFor(d) ? run + 1 : 1;
-      } else {
-        run = 1;
-      }
-      longest = Math.max(longest, run);
-      prev = d;
-    }
-    return { current, longest };
-  }, [stats.completed]);
+  const { stats, streak, chartData, uniqueShelves, groupedHistory } = useStats({ logs, library, activeReader, readerGoals, getBookCover });
 
   // Milestone unlocks. Progress is kept in localStorage per (user, reader) so
   // each badge only celebrates once. The first computation for a reader this
@@ -421,69 +142,6 @@ export default function Home() {
       celebratedInit.current.add(activeReader);
     }
   }, [stats.lifetimeCount, streak.current, activeReader, session]);
-
-  const uniqueShelves = useMemo(() => {
-      const shelves = new Set<string>();
-      library.forEach(book => {
-          if (book.shelves) book.shelves.forEach(s => shelves.add(s));
-      });
-      return Array.from(shelves).sort();
-  }, [library]);
-
-  const chartData = useMemo(() => {
-      const days = [];
-      const now = new Date();
-      const currentDay = now.getDay(); 
-      const diff = currentDay === 0 ? 6 : currentDay - 1; 
-      const monday = new Date(now);
-      monday.setDate(now.getDate() - diff);
-      for (let i = 0; i < 7; i++) {
-          const d = new Date(monday);
-          d.setDate(monday.getDate() + i);
-          const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(d);
-          let count = 0;
-          if (d <= now) {
-              count = logs.filter(item => { if (!item.timestamp) return false; const itemDate = new Date(item.timestamp); return item.reader_name === activeReader && itemDate.getDate() === d.getDate() && itemDate.getMonth() === d.getMonth(); }).length;
-          }
-          days.push({ day: dayName, count, isToday: d.getDate() === now.getDate() && d.getMonth() === now.getMonth() }); 
-      } 
-      return days; 
-  }, [logs, activeReader]);
-
-  const groupedHistory = useMemo(() => { 
-      const groups: { today: any[], yesterday: any[], week: any[], older: any[] } = { today: [], yesterday: [], week: [], older: [] };
-      const sortedLog = [...stats.completed].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      const aggregated: Record<string, any> = {};
-      
-      sortedLog.forEach(item => {
-          const dateKey = new Date(item.timestamp).toLocaleDateString();
-          const key = `${dateKey}-${item.book_title}`;
-          if (!aggregated[key]) {
-              const libBook = library.find(b => b.title === item.book_title);
-              aggregated[key] = { 
-                  id: item.id, 
-                  title: item.book_title, 
-                  author: item.book_author, 
-                  cover: getBookCover(item.book_title), 
-                  dailyCount: 0, 
-                  timestamp: item.timestamp, 
-                  reader: item.reader_name, 
-                  notes: item.notes,
-                  ownershipStatus: libBook ? libBook.ownership_status : 'wishlist',
-                  shelves: libBook ? libBook.shelves : [] 
-              };
-          }
-          aggregated[key].dailyCount += 1;
-      });
-      
-      Object.values(aggregated).forEach((item: any) => {
-          if (isToday(item.timestamp)) groups.today.push(item);
-          else if (isYesterday(item.timestamp)) groups.yesterday.push(item);
-          else if (isEarlierThisWeek(item.timestamp)) groups.week.push(item);
-          else groups.older.push(item);
-      });
-      return groups;
-  }, [stats.completed, library]); // Removed getBookCover from dependencies as it's a function
 
   // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {
@@ -919,13 +577,6 @@ export default function Home() {
       showToast(`Logged "${log.book_title}" for ${log.reader_name}.`);
   };
 
-  const handleShareRegistry = () => {
-      const url = `${window.location.origin}/registry/${session.user.id}`;
-      navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-  };
-
   const selectedBookHistory = useMemo(() => {
       if (!selectedBook) return [];
       // Only completed reads appear in history; in-progress chapter books show
@@ -943,333 +594,6 @@ export default function Home() {
 
   // --- RENDER FUNCTIONS ---
   
-  const renderParentDashboard = () => (
-      <div className="animate-in fade-in zoom-in-95 duration-300 pb-20">
-          <div className="flex items-center gap-4 py-6 mb-4">
-             <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white"><Settings size={24} /></div>
-             <div><h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Parent's Corner</h1><p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Admin Dashboard</p></div>
-          </div>
-          <div className="space-y-6">
-              <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-                  <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Family Goals & Profiles</h3>
-                  <div className="space-y-6">
-                      {readers.map(kid => (
-                          <div key={kid} className="p-4 bg-slate-50 rounded-3xl border border-slate-100">
-                              <div className="flex items-center justify-between mb-4">
-                                  <div className="flex items-center gap-3">
-                                      <button onClick={() => handleOpenAvatarModal(kid)} className="relative group"><img src={getAvatarUrl(kid, readerAvatars)} className="w-10 h-10 rounded-full bg-white shadow-sm object-cover" /><div className="absolute inset-0 bg-black/20 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Edit3 size={12} className="text-white" /></div></button>
-                                      <span className="font-bold text-slate-900 text-lg">{kid}</span>
-                                  </div>
-                                  {readers.length > 0 && kid !== readers[readers.length - 1] && <button onClick={() => handleDeleteChild(kid)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"><Trash2 size={18} /></button>}
-                              </div>
-                              {readers.length > 0 && kid !== readers[readers.length - 1] && (<div className="space-y-3 pl-14"><div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>DAILY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).daily} books</span></div><input type="range" min="1" max="10" value={(readerGoals[kid] || readerGoals['default']).daily} onChange={(e) => handleUpdateChildGoal(kid, 'daily', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div><div><div className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>WEEKLY GOAL</span><span className="text-slate-900">{(readerGoals[kid] || readerGoals['default']).weekly} books</span></div><input type="range" min="5" max="50" step="1" value={(readerGoals[kid] || readerGoals['default']).weekly} onChange={(e) => handleUpdateChildGoal(kid, 'weekly', parseInt(e.target.value))} className="w-full accent-slate-900 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer" /></div></div>)}
-                          </div>
-                      ))}
-                      <button onClick={handleAddChildClick} className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold flex items-center justify-center gap-2 hover:border-slate-400 hover:text-slate-600 transition-all active:scale-95"><UserPlus size={18} /><span>Add Child</span></button>
-                  </div>
-              </section>
-              <button
-                  onClick={() => setShowYearReview(true)}
-                  className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-fuchsia-600 text-white font-bold rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                  ✨ {new Date().getFullYear()} Year in Books
-              </button>
-
-              <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-                  <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">System</h3>
-                  <button onClick={handleChangePin} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors mb-2">Change Parent PIN</button>
-                  <button onClick={handleResetApp} className="w-full py-3 bg-red-50 text-red-500 font-bold rounded-xl text-sm hover:bg-red-100 transition-colors">Factory Reset App</button>
-                  <button onClick={handleLogout} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors mt-2">Log Out</button>
-              </section>
-              <button onClick={() => setActiveReader(readers[0] || 'Leo')} className="w-full py-4 bg-slate-900 text-white font-bold rounded-[2rem] shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform"><LogOut size={18} /><span>Exit Parent Mode</span></button>
-          </div>
-      </div>
-  );
-
-  const renderHomeView = () => (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
-      <section className="flex flex-col items-center justify-center py-12">
-          {/* CHANGED: Label and Value for Lifetime Reads */}
-          <h2 className="text-[10px] font-extrabold tracking-[0.2em] text-slate-400 uppercase mb-2">{activeReader}'s Lifetime Reads</h2>
-          <div className="font-mono-tabular text-9xl font-extrabold text-slate-900 tracking-tighter transition-all">{stats.lifetimeCount}</div>
-      </section>
-      <section className="space-y-8">
-        <StreakCard current={streak.current} longest={streak.longest} readerName={activeReader} />
-        {(() => {
-          const earned = MILESTONES.filter(m => m.test({ lifetime: stats.lifetimeCount, streak: streak.current }));
-          if (earned.length === 0) return null;
-          return (
-            <div>
-              <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Achievements</h3>
-              <div className="flex flex-wrap gap-2">
-                {earned.map(m => (
-                  <div key={m.id} className="flex items-center gap-1.5 bg-white border border-slate-100 rounded-full pl-2 pr-3 py-1.5 shadow-sm">
-                    <span className="text-base leading-none">{m.emoji}</span>
-                    <span className="text-xs font-bold text-slate-700">{m.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-        {stats.currentlyReading.length > 0 && (
-          <div>
-            <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Currently Reading</h3>
-            <div className="space-y-3">
-              {stats.currentlyReading.map((l) => {
-                const lib = library.find(b => b.title === l.book_title);
-                const cover = getBookCover(l.book_title);
-                const day = daysBetween(l.started_at, new Date().toISOString());
-                return (
-                  <div key={l.id} className="bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center gap-4 shadow-sm">
-                    <button
-                      onClick={() => lib && setSelectedBook({ ...lib, cover: lib.cover_url || undefined, ownershipStatus: lib.ownership_status, inWishlist: lib.in_wishlist, rating: lib.rating, memo: lib.memo || undefined, shelves: lib.shelves })}
-                      className="flex items-center gap-4 flex-1 text-left min-w-0"
-                    >
-                      <div className="w-12 h-16 rounded-xl bg-amber-100 overflow-hidden flex items-center justify-center text-amber-500 shrink-0 border border-amber-200">
-                        {cover ? <img src={cover} className="w-full h-full object-cover" /> : <BookMarked size={18} />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-slate-900 line-clamp-1">{l.book_title}</p>
-                        <p className="text-xs text-amber-600 font-bold">Day {day} · since {l.started_at ? new Date(l.started_at).toLocaleDateString() : ''}</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => handleFinishReading(l.id, new Date().toISOString())}
-                      className="px-4 py-2.5 rounded-full bg-slate-900 text-white text-xs font-bold active:scale-95 transition-transform shrink-0"
-                    >
-                      Finish
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        <div>
-          <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Heavy Rotation</h3>
-          <div className="grid grid-cols-3 gap-3">
-             {Object.values(stats.completed.reduce((acc: any, item) => {
-                 const key = item.book_title;
-                 if (!acc[key]) {
-                     acc[key] = { 
-                         id: item.id,
-                         title: item.book_title,
-                         author: item.book_author,
-                         count: 0, 
-                         cover: getBookCover(item.book_title) 
-                     };
-                 }
-                 acc[key].count++;
-                 return acc;
-             }, {})).sort((a: any, b: any) => b.count - a.count).slice(0, 3).map((item: any) => (
-               <button key={item.id} onClick={() => setSelectedBook(item)} className="relative aspect-[3/4] bg-slate-200 rounded-3xl overflow-hidden border border-slate-300 transition-transform active:scale-[0.98] group">
-                 {item.cover ? <img src={item.cover} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" /> : <div className="w-full h-full flex items-center justify-center text-slate-400"><BookOpen size={24} /></div>}
-                 <div className="absolute top-2 right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm">{item.count}</div>
-               </button>
-             ))}
-             {stats.completed.length === 0 && (<div className="col-span-3 py-8 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 text-xs font-bold">No reading history yet.</div>)}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-
-  const renderLibraryView = () => {
-    const filters = [
-        { id: 'owned', label: 'Library' },
-        { id: 'wishlist', label: 'Wish List' },
-        { id: 'borrowed', label: 'Borrowed' },
-        ...uniqueShelves.map(s => ({ id: s, label: s }))
-    ];
-
-    // Filter Logic
-    const filteredBooks: Book[] = library.filter(book => {
-        const safeTitle = (book.title || '').toLowerCase();
-        const safeAuthor = (book.author || '').toLowerCase();
-        const searchLower = search.toLowerCase();
-        const matchesSearch = safeTitle.includes(searchLower) || safeAuthor.includes(searchLower);
-        let matchesFilter = false;
-        
-        if (filter === 'owned') matchesFilter = book.ownership_status === 'owned' || (!book.ownership_status && !book.in_wishlist);
-        else if (filter === 'borrowed') matchesFilter = book.ownership_status === 'borrowed';
-        else if (filter === 'wishlist') matchesFilter = book.in_wishlist === true;
-        else matchesFilter = book.shelves?.includes(filter) || false; 
-
-        return matchesSearch && matchesFilter;
-    }).sort((a, b) => (getLastName(a.author || '').localeCompare(getLastName(b.author || ''))));
-    
-    // Grouping
-    const groupedBooks = filteredBooks.reduce((groups, book) => {
-        const lastName = getLastName(book.author || 'Unknown');
-        const letter = lastName.charAt(0).toUpperCase();
-        if (!groups[letter]) groups[letter] = [];
-        groups[letter].push(book);
-        return groups;
-    }, {} as Record<string, Book[]>);
-    
-    const sortedKeys = Object.keys(groupedBooks).sort();
-
-    return (
-        <div className="animate-in fade-in slide-in-from-right-8 duration-300 pb-20">
-            <div className="flex justify-between items-center pt-4 mb-4">
-                <h1 className="text-4xl font-extrabold tracking-tight">Library</h1>
-                {filter === 'wishlist' && (
-                    <button 
-                        onClick={handleShareRegistry}
-                        className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold uppercase tracking-wide flex items-center gap-2 active:scale-95 transition-all"
-                    >
-                        {copied ? <Check size={14} /> : <Share2 size={14} />}
-                        {copied ? 'Copied!' : 'Share'}
-                    </button>
-                )}
-            </div>
-
-            <div className="flex items-center gap-2 overflow-x-auto pb-4 -mx-6 px-6 no-scrollbar">
-                {filters.map(f => (
-                    <button 
-                        key={f.id} 
-                        onClick={() => setFilter(f.id)} 
-                        className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
-                            filter === f.id 
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/20' 
-                            : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                        }`}
-                    >
-                        {f.label}
-                    </button>
-                ))}
-            </div>
-
-            <input type="text" placeholder="Search..." className="w-full bg-white border border-slate-200 rounded-2xl pl-4 pr-4 py-4 mb-4" value={search} onChange={(e) => setSearch(e.target.value)} />
-            
-            <div className="space-y-8">
-                {sortedKeys.map(letter => (
-                    <div key={letter}>
-                        <h2 className="text-sm font-extrabold text-slate-400 mb-4 px-2 sticky top-20">{letter}</h2>
-                        <div className="space-y-3">
-                            {groupedBooks[letter].map((book: Book) => (
-                              <div key={book.id || `temp-${book.title}`}>
-                                <button
-                                    onClick={() => setSelectedBook({ ...book, cover: book.cover_url || undefined, ownershipStatus: book.ownership_status, shelves: book.shelves, inWishlist: book.in_wishlist, rating: book.rating, memo: book.memo || undefined })}
-                                    className="w-full bg-white p-3 rounded-[1.5rem] shadow-sm border border-slate-100 flex items-center gap-4 text-left group active:scale-[0.99] transition-transform"
-                                >
-                                    <div className="w-12 h-16 shrink-0 bg-slate-100 rounded-xl overflow-hidden shadow-inner flex items-center justify-center text-slate-300">
-                                        {book.cover_url ? <img src={book.cover_url} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <p className="font-bold text-slate-900 truncate">{book.title}</p>
-                                            {/* Rating Stars (Mini) */}
-                                            {book.rating > 0 && (
-                                                <div className="flex">
-                                                    {[...Array(book.rating)].map((_, i) => (
-                                                        <Star key={i} size={8} className="text-amber-400 fill-amber-400" />
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {/* Tag Badges */}
-                                            {book.shelves && book.shelves.length > 0 && (
-                                                <div className="flex -space-x-1">
-                                                    {book.shelves.slice(0,2).map(s => (
-                                                        <div key={s} className="w-2 h-2 rounded-full bg-indigo-400 ring-2 ring-white" />
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {filter === 'all' && book.ownership_status === 'borrowed' && (<div className="px-1.5 py-0.5 bg-indigo-100 rounded-md"><StickyNote size={10} className="text-indigo-600" /></div>)}
-                                            {(filter === 'all' || filter === 'wishlist') && book.in_wishlist && (<div className="px-1.5 py-0.5 bg-orange-100 rounded-md"><Gift size={10} className="text-orange-600" /></div>)}
-                                        </div>
-                                        <p className="text-xs text-slate-500 font-medium truncate">{book.author}</p>
-                                    </div>
-                                    <ChevronRight size={20} className="text-slate-200 group-hover:text-slate-400" />
-                                </button>
-
-                                {/* Wishlist meta: gift status + occasion picker */}
-                                {filter === 'wishlist' && book.in_wishlist && (
-                                    <div className="flex items-center gap-2 px-3 pt-2 flex-wrap">
-                                        {book.purchased_at ? (
-                                            <span className="px-2.5 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-bold flex items-center gap-1">
-                                                🎁 Purchased{book.purchased_by ? ` by ${book.purchased_by}` : ''}
-                                            </span>
-                                        ) : (
-                                            OCCASIONS.map(o => (
-                                                <button
-                                                    key={o}
-                                                    onClick={() => handleUpdateOccasion(book.id, book.occasion === o ? null : o)}
-                                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border ${
-                                                        book.occasion === o
-                                                        ? 'bg-indigo-600 text-white border-indigo-600'
-                                                        : 'bg-white text-slate-400 border-slate-200'
-                                                    }`}
-                                                >
-                                                    {o}
-                                                </button>
-                                            ))
-                                        )}
-                                    </div>
-                                )}
-                              </div>
-                            ))}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-  };
-
-  const renderHistoryView = () => {
-    const isDailyGoalMet = stats.dailyCount >= stats.goals.daily;
-    const isWeeklyGoalMet = stats.weeklyCount >= stats.goals.weekly;
-
-    const renderBookList = (items: any[], title: string) => (
-        <div className="mb-6">
-            <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-3 pl-2">{title}</h3>
-            <div className="space-y-3">
-                {items.map((item: any) => (
-                    <div key={item.id} className="w-full bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
-                        <button onClick={() => setSelectedBook(item)} className="flex items-center gap-4 flex-1 text-left">
-                            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden">
-                                {item.cover ? <img src={item.cover} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
-                            </div>
-                            <div className="flex-1 min-w-0 pr-2">
-                                <p className="font-bold text-slate-900 line-clamp-1">{item.title}</p>
-                                <p className="text-xs text-slate-500 font-medium line-clamp-1">{item.author}</p>
-                            </div>
-                        </button>
-                        <div className="flex items-center gap-3">
-                            {item.dailyCount > 1 && (<span className="font-mono-tabular font-bold text-slate-400 text-sm">{item.dailyCount}x</span>)}
-                            <button onClick={(e) => handleQuickAdd(e, item)} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all active:scale-90"><Plus size={18} strokeWidth={3} /></button>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-
-    return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
-            <h1 className="text-4xl font-extrabold tracking-tight pt-4 mb-6">Activity</h1>
-            <ReadingChart data={chartData} />
-            <div className="mb-6"><StreakCard current={streak.current} longest={streak.longest} readerName={activeReader} /></div>
-            <div className="space-y-4 mb-8">
-                <button onClick={() => { setEditingGoalType('daily'); setGoalModalOpen(true); }} className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isDailyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}>
-                    <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isDailyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Daily Goal</p><p className="text-xl font-bold">{isDailyGoalMet ? 'Goal Achieved! ✨' : `${stats.goals.daily - stats.dailyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-lg ${isDailyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.dailyCount}/{stats.goals.daily}</p></div>
-                    <div className={`mt-4 h-2 rounded-full overflow-hidden ${isDailyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isDailyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.dailyCount / stats.goals.daily) * 100, 100)}%` }} /></div>
-                </button>
-                <button onClick={() => { setEditingGoalType('weekly'); setGoalModalOpen(true); }} className={`w-full text-left p-6 rounded-[2.5rem] shadow-sm border transition-all duration-500 relative overflow-hidden active:scale-[0.98] ${isWeeklyGoalMet ? 'bg-[#008f68] text-white border-transparent shadow-xl shadow-emerald-900/10' : 'bg-white text-slate-900 border-slate-100'}`}>
-                    <div className="flex justify-between items-start mb-1 relative z-10"><div className="space-y-0.5"><p className={`text-[10px] font-bold uppercase tracking-widest ${isWeeklyGoalMet ? 'opacity-80' : 'text-slate-400'}`}>Weekly Goal</p><p className="text-xl font-bold">{isWeeklyGoalMet ? 'Weekly Target Met! 🏆' : `${stats.goals.weekly - stats.weeklyCount} more to reach target`}</p></div><p className={`font-mono-tabular font-bold text-slate-400 ${isWeeklyGoalMet ? 'opacity-90' : 'text-slate-400'}`}>{stats.weeklyCount}/{stats.goals.weekly}</p></div>
-                    <div className={`mt-4 h-2 rounded-full overflow-hidden ${isWeeklyGoalMet ? 'bg-emerald-400/30' : 'bg-slate-100'}`}><div className={`h-full rounded-full transition-all duration-1000 ease-out ${isWeeklyGoalMet ? 'bg-white' : 'bg-slate-900'}`} style={{ width: `${Math.min((stats.weeklyCount / stats.goals.weekly) * 100, 100)}%` }} /></div>
-                </button>
-            </div>
-            {groupedHistory.today.length > 0 && renderBookList(groupedHistory.today, 'Today')}
-            {groupedHistory.yesterday.length > 0 && renderBookList(groupedHistory.yesterday, 'Yesterday')}
-            {groupedHistory.week.length > 0 && renderBookList(groupedHistory.week, 'Earlier This Week')}
-            {stats.readerLog.length === 0 && (<div className="text-center py-10 text-slate-400 text-sm font-medium">No reading activity yet. Start logging some books!</div>)}
-        </div>
-    );
-  };
-
   if (loadingSession) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" size={32} /></div>;
   if (!session) return <LandingPage />;
   if (needsOnboarding) return <OnboardingWizard userId={session.user.id} onComplete={() => { setNeedsOnboarding(false); fetchData(session.user.id); }} />;
@@ -1313,9 +637,53 @@ export default function Home() {
         </div>
       </header>
       <main className="mt-20 px-6 max-w-lg mx-auto w-full">
-        {readers.length > 0 && activeReader === readers[readers.length-1] ? renderParentDashboard() : (activeTab === 'library' ? renderLibraryView() : activeTab === 'home' ? renderHomeView() : renderHistoryView())}
+        {readers.length > 0 && activeReader === readers[readers.length-1] ? (
+          <ParentDashboard
+            readers={readers}
+            readerAvatars={readerAvatars}
+            readerGoals={readerGoals}
+            onOpenAvatar={handleOpenAvatarModal}
+            onDeleteChild={handleDeleteChild}
+            onUpdateChildGoal={handleUpdateChildGoal}
+            onAddChild={handleAddChildClick}
+            onShowYearReview={() => setShowYearReview(true)}
+            onChangePin={handleChangePin}
+            onResetApp={handleResetApp}
+            onLogout={handleLogout}
+            onExitParentMode={() => setActiveReader(readers[0] || 'Leo')}
+          />
+        ) : (activeTab === 'library' ? (
+          <LibraryView
+            library={library}
+            uniqueShelves={uniqueShelves}
+            userId={session.user.id}
+            onSelectBook={setSelectedBook}
+            onUpdateOccasion={handleUpdateOccasion}
+          />
+        ) : activeTab === 'home' ? (
+          <HomeView
+            activeReader={activeReader}
+            stats={stats}
+            streak={streak}
+            library={library}
+            getBookCover={getBookCover}
+            onSelectBook={setSelectedBook}
+            onFinishReading={handleFinishReading}
+          />
+        ) : (
+          <HistoryView
+            stats={stats}
+            chartData={chartData}
+            streak={streak}
+            activeReader={activeReader}
+            groupedHistory={groupedHistory}
+            onSelectBook={setSelectedBook}
+            onQuickAdd={handleQuickAdd}
+            onOpenGoal={(type) => { setEditingGoalType(type); setGoalModalOpen(true); }}
+          />
+        ))}
       </main>
-      {readers.length > 0 && activeReader !== readers[readers.length-1] && (<nav className="fixed bottom-0 left-0 right-0 bg-slate-100/90 backdrop-blur-xl border-t border-slate-200 px-12 py-6 flex items-center justify-between z-50 rounded-t-[2.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.04)]"><button onClick={() => setActiveTab('library')} className={`transition-all ${activeTab === 'library' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><LibraryIcon size={32} strokeWidth={activeTab === 'library' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('home')} className={`transition-all ${activeTab === 'home' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><BookOpen size={32} strokeWidth={activeTab === 'home' ? 2.5 : 2} /></button><button onClick={() => setActiveTab('history')} className={`transition-all ${activeTab === 'history' ? 'text-slate-900 scale-110' : 'text-slate-300'}`}><Activity size={32} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></button></nav>)}
+      {readers.length > 0 && activeReader !== readers[readers.length-1] && (<BottomNav activeTab={activeTab} onTabChange={setActiveTab} />)}
       {readers.length > 0 && activeReader !== readers[readers.length-1] && (
         <div className="fixed bottom-24 left-0 right-0 flex justify-center items-center gap-4 z-40 pointer-events-none">
             {/* Standard Add Button */}

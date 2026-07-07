@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag, BookMarked } from 'lucide-react';
+import { daysBetween } from '@/lib/helpers';
 
 // ISO <-> yyyy-MM-dd for <input type="date">, anchoring rebuilt timestamps at
 // local noon so a date edit never shifts across a timezone boundary.
@@ -13,14 +14,6 @@ const isoToDateInput = (iso?: string | null) => {
 const dateInputToIso = (s: string) => {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d, 12, 0, 0).toISOString();
-};
-// Inclusive whole-day count between two ISO timestamps (day 1 = same day).
-const daysBetween = (aIso?: string | null, bIso?: string | null) => {
-  if (!aIso || !bIso) return 0;
-  const a = new Date(aIso); const b = new Date(bIso);
-  const a0 = new Date(a.getFullYear(), a.getMonth(), a.getDate());
-  const b0 = new Date(b.getFullYear(), b.getMonth(), b.getDate());
-  return Math.round((b0.getTime() - a0.getTime()) / 86400000) + 1;
 };
 
 /* ... (Interfaces remain the same) ... */
