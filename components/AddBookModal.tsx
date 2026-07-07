@@ -15,10 +15,11 @@ const dateInputToIso = (s: string) => {
 };
 
 export interface GoogleBook {
-  id: string; 
+  id: string;
   title: string;
   author: string;
   coverUrl: string | null;
+  isbn?: string | null;
   description?: string;
   pageCount?: number;
   source?: 'community' | 'google';
