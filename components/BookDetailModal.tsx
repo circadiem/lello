@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag, BookMarked } from 'lucide-react';
+import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag, BookMarked, Camera } from 'lucide-react';
 import { daysBetween } from '@/lib/helpers';
+import { READ_MODES } from '@/lib/constants';
 
 // ISO <-> yyyy-MM-dd for <input type="date">, anchoring rebuilt timestamps at
 // local noon so a date edit never shifts across a timezone boundary.
@@ -30,7 +31,8 @@ interface DisplayItem {
   inWishlist?: boolean;
   rating?: number;
   memo?: string;
-  shelves?: string[]; 
+  shelves?: string[];
+  due_date?: string | null;
 }
 
 interface HistoryItem {
@@ -41,6 +43,8 @@ interface HistoryItem {
   timestamp: string;
   notes?: string;
   started_at?: string | null;
+  photo_url?: string | null;
+  quote?: string | null;
 }
 
 interface ActiveReading {
@@ -52,10 +56,11 @@ interface BookDetailModalProps {
   book: DisplayItem | null; 
   history: HistoryItem[];
   onClose: () => void;
-  onReadAgain: (book: any) => void;
+  onReadAgain: (book: any, readMode?: string) => void;
   onRemove: (id: string | number) => void;
   onDeleteAsset: (id: string | number, title: string) => void;
   onUpdateStatus: (id: string, status: 'owned' | 'borrowed') => void;
+  onUpdateDueDate?: (id: string, due: string | null) => void;
   onUpdateWishlist: (id: string, inWishlist: boolean) => void;
   onUpdateRating: (id: string, rating: number) => void;
   onUpdateMemo: (id: string, memo: string) => void;
@@ -66,15 +71,17 @@ interface BookDetailModalProps {
   activeReading?: ActiveReading | null;
   onStartReading?: (book: { title: string; author: string }, startIso: string) => void;
   onUpdateStartDate?: (logId: string | number, iso: string) => void;
-  onFinishReading?: (logId: string | number, finishIso: string) => void;
+  onFinishReading?: (logId: string | number, finishIso: string, readMode?: string) => void;
   onCancelReading?: (logId: string | number) => void;
+  onAddMemory?: (logId: string | number, memory: { quote?: string; file?: File | null }) => void;
 }
 
 export default function BookDetailModal({
     book, history, onClose, onReadAgain, onRemove, onDeleteAsset,
-    onUpdateStatus, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves,
+    onUpdateStatus, onUpdateDueDate, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves,
     onUpdateLogDate, allShelves = [],
-    activeReader, activeReading, onStartReading, onUpdateStartDate, onFinishReading, onCancelReading
+    activeReader, activeReading, onStartReading, onUpdateStartDate, onFinishReading, onCancelReading,
+    onAddMemory
 }: BookDetailModalProps) {
 
     const [memo, setMemo] = useState(book?.memo || '');
@@ -82,6 +89,15 @@ export default function BookDetailModal({
     const [hoverRating, setHoverRating] = useState(0);
     const [shelves, setShelves] = useState<string[]>(book?.shelves || []);
     const [newShelf, setNewShelf] = useState('');
+    // Reading Memories: which history row's add-memory form is open, its inputs,
+    // and the full-screen photo overlay.
+    const [memoryOpenFor, setMemoryOpenFor] = useState<string | number | null>(null);
+    const [memoryQuote, setMemoryQuote] = useState('');
+    const [memoryFile, setMemoryFile] = useState<File | null>(null);
+    const [photoOverlay, setPhotoOverlay] = useState<string | null>(null);
+    const [readMode, setReadMode] = useState<string>('to_child');
+    const [finishMode, setFinishMode] = useState<string>('to_child');
+    const [showDuePicker, setShowDuePicker] = useState(false);
     const [finishDate, setFinishDate] = useState('');
     const [showStartPicker, setShowStartPicker] = useState(false);
     const [startDate, setStartDate] = useState('');
@@ -93,6 +109,8 @@ export default function BookDetailModal({
             setShelves(book.shelves || []);
             setNewShelf('');
             setFinishDate(isoToDateInput(new Date().toISOString()));
+            setFinishMode('to_child');
+            setShowDuePicker(false);
             setShowStartPicker(false);
             setStartDate(isoToDateInput(new Date().toISOString()));
         }
@@ -132,6 +150,7 @@ export default function BookDetailModal({
            High Z-Index (z-[9999]) guarantees it sits on top of your app header.
            items-center ensures it doesn't get pushed into the status bar on mobile.
         */
+        <>
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
             
             {/* Backdrop */}
@@ -232,6 +251,43 @@ export default function BookDetailModal({
                             </div>
                         </div>
 
+                        {/* Due date — only meaningful for a borrowed book. Reveal-then-confirm:
+                            the date input only opens the native picker on a direct tap. */}
+                        {!isOwned && onUpdateDueDate && (
+                            <div className="mb-6 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                                {book.due_date || showDuePicker ? (
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 text-indigo-700 font-bold text-sm shrink-0">
+                                            <Clock size={16} /> Return by
+                                        </div>
+                                        <input
+                                            type="date"
+                                            value={isoToDateInput(book.due_date)}
+                                            min={isoToDateInput(new Date().toISOString())}
+                                            onChange={(e) => onUpdateDueDate(String(book.id), e.target.value ? dateInputToIso(e.target.value) : null)}
+                                            className="flex-1 min-w-0 bg-white border border-indigo-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none"
+                                            aria-label="Due date"
+                                        />
+                                        {book.due_date && (
+                                            <button
+                                                onClick={() => { onUpdateDueDate(String(book.id), null); setShowDuePicker(false); }}
+                                                className="text-xs font-bold text-slate-400 hover:text-rose-500 shrink-0"
+                                            >
+                                                Clear
+                                            </button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowDuePicker(true)}
+                                        className="flex items-center gap-2 text-indigo-600 font-bold text-sm"
+                                    >
+                                        <Clock size={16} /> Set a return date
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
                         {/* Chapter book: start → finish tracking */}
                         {(onStartReading || activeReading) && (
                             <div className="mb-6">
@@ -254,6 +310,13 @@ export default function BookDetailModal({
                                                 aria-label="Start date"
                                             />
                                         </div>
+                                        <div className="flex gap-1 p-1 bg-amber-100/60 rounded-xl mb-2">
+                                            {READ_MODES.map(m => (
+                                                <button key={m.id} onClick={() => setFinishMode(m.id)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all ${finishMode === m.id ? 'bg-white shadow-sm text-slate-900' : 'text-amber-700/70 hover:text-amber-800'}`}>
+                                                    <span>{m.emoji}</span><span>{m.short}</span>
+                                                </button>
+                                            ))}
+                                        </div>
                                         <div className="flex gap-2 items-center">
                                             <input
                                                 type="date"
@@ -264,7 +327,7 @@ export default function BookDetailModal({
                                                 className="flex-1 bg-white border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 focus:outline-none"
                                             />
                                             <button
-                                                onClick={() => finishDate && onFinishReading?.(activeReading.id, dateInputToIso(finishDate))}
+                                                onClick={() => finishDate && onFinishReading?.(activeReading.id, dateInputToIso(finishDate), finishMode)}
                                                 className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold active:scale-95 transition-transform"
                                             >
                                                 Finish
@@ -417,32 +480,87 @@ export default function BookDetailModal({
                             
                             <div className="space-y-3">
                                 {history.length > 0 ? (
-                                    history.map((log) => (
-                                        <div key={log.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-bold">
-                                                    {log.reader?.charAt(0) || 'R'}
+                                    history.map((log) => {
+                                      const hasMemory = !!(log.photo_url || log.quote);
+                                      return (
+                                        <div key={log.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-bold shrink-0">
+                                                        {log.reader?.charAt(0) || 'R'}
+                                                    </div>
+                                                    <div>
+                                                        <input
+                                                            type="date"
+                                                            value={isoToDateInput(log.timestamp)}
+                                                            max={isoToDateInput(new Date().toISOString())}
+                                                            onChange={(e) => e.target.value && onUpdateLogDate(log.id, dateInputToIso(e.target.value))}
+                                                            className="text-sm font-bold text-slate-900 bg-transparent border-0 p-0 focus:outline-none cursor-pointer"
+                                                            aria-label="Date read"
+                                                        />
+                                                        {log.started_at && (
+                                                            <p className="text-[11px] font-bold text-amber-600">Read over {daysBetween(log.started_at, log.timestamp)} days</p>
+                                                        )}
+                                                        {log.notes && <p className="text-xs text-slate-500 italic">"{log.notes}"</p>}
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <input
-                                                        type="date"
-                                                        value={isoToDateInput(log.timestamp)}
-                                                        max={isoToDateInput(new Date().toISOString())}
-                                                        onChange={(e) => e.target.value && onUpdateLogDate(log.id, dateInputToIso(e.target.value))}
-                                                        className="text-sm font-bold text-slate-900 bg-transparent border-0 p-0 focus:outline-none cursor-pointer"
-                                                        aria-label="Date read"
-                                                    />
-                                                    {log.started_at && (
-                                                        <p className="text-[11px] font-bold text-amber-600">Read over {daysBetween(log.started_at, log.timestamp)} days</p>
-                                                    )}
-                                                    {log.notes && <p className="text-xs text-slate-500 italic">"{log.notes}"</p>}
-                                                </div>
+                                                <button onClick={() => onRemove(log.id)} className="text-slate-300 hover:text-red-400 p-2">
+                                                    <Trash2 size={14} />
+                                                </button>
                                             </div>
-                                            <button onClick={() => onRemove(log.id)} className="text-slate-300 hover:text-red-400 p-2">
-                                                <Trash2 size={14} />
-                                            </button>
+
+                                            {hasMemory && (
+                                                <div className="mt-2 pl-11 flex items-start gap-3">
+                                                    {log.photo_url && (
+                                                        <button onClick={() => setPhotoOverlay(log.photo_url!)} className="shrink-0" aria-label="View photo">
+                                                            <img src={log.photo_url} className="w-12 h-12 rounded-lg object-cover" alt="Memory" />
+                                                        </button>
+                                                    )}
+                                                    {log.quote && <p className="text-sm italic text-slate-600 leading-snug">&ldquo;{log.quote}&rdquo;</p>}
+                                                </div>
+                                            )}
+
+                                            {!hasMemory && onAddMemory && (
+                                                memoryOpenFor === log.id ? (
+                                                    <div className="mt-2 pl-11 space-y-2">
+                                                        <input
+                                                            type="text"
+                                                            value={memoryQuote}
+                                                            onChange={(e) => setMemoryQuote(e.target.value)}
+                                                            placeholder="A funny thing they said…"
+                                                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-slate-900/20"
+                                                        />
+                                                        {memoryFile ? (
+                                                            <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                                                                <img src={URL.createObjectURL(memoryFile)} className="w-8 h-8 rounded object-cover" alt="preview" /> Photo attached
+                                                                <button onClick={() => setMemoryFile(null)} className="text-slate-400 hover:text-rose-500" aria-label="Remove photo"><X size={14} /></button>
+                                                            </div>
+                                                        ) : (
+                                                            <label className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 cursor-pointer">
+                                                                <Camera size={14} /> Add a photo
+                                                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => setMemoryFile(e.target.files?.[0] || null)} />
+                                                            </label>
+                                                        )}
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                disabled={!memoryQuote.trim() && !memoryFile}
+                                                                onClick={() => { onAddMemory(log.id, { quote: memoryQuote, file: memoryFile }); setMemoryOpenFor(null); }}
+                                                                className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold disabled:opacity-40 active:scale-95 transition-all"
+                                                            >
+                                                                Save
+                                                            </button>
+                                                            <button onClick={() => setMemoryOpenFor(null)} className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-slate-600">Cancel</button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <button onClick={() => { setMemoryOpenFor(log.id); setMemoryQuote(''); setMemoryFile(null); }} className="mt-1 ml-11 inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700">
+                                                        <Plus size={12} strokeWidth={3} /> memory
+                                                    </button>
+                                                )
+                                            )}
                                         </div>
-                                    ))
+                                      );
+                                    })
                                 ) : (
                                     <div className="text-center py-6 border-2 border-dashed border-slate-100 rounded-xl">
                                         <p className="text-xs text-slate-400 font-bold">No logs yet.</p>
@@ -453,7 +571,17 @@ export default function BookDetailModal({
                         
                         {/* Actions */}
                         <div className="mt-8 space-y-4">
-                            <button onClick={() => onReadAgain(book)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Who's reading it this time?</label>
+                                <div className="flex p-1 bg-slate-100 rounded-2xl">
+                                    {READ_MODES.map(m => (
+                                        <button key={m.id} onClick={() => setReadMode(m.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${readMode === m.id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>
+                                            <span>{m.emoji}</span> {m.short}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <button onClick={() => onReadAgain(book, readMode)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
                                 <Plus size={20} strokeWidth={3} />
                                 Log Another Read
                             </button>
@@ -467,5 +595,11 @@ export default function BookDetailModal({
                 </div>
             </div>
         </div>
+        {photoOverlay && (
+            <div className="fixed inset-0 z-[10000] bg-black/90 flex items-center justify-center p-4" onClick={() => setPhotoOverlay(null)}>
+                <img src={photoOverlay} className="max-w-full max-h-full rounded-2xl" alt="Memory" />
+            </div>
+        )}
+        </>
     );
 }

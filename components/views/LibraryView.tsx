@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Share2, Check, BookOpen, Star, StickyNote, Gift, ChevronRight } from 'lucide-react';
-import { getLastName } from '@/lib/helpers';
+import React, { useState, useEffect } from 'react';
+import { Share2, Check, BookOpen, Star, StickyNote, Gift, ChevronRight, Clock } from 'lucide-react';
+import { getLastName, dueInDays } from '@/lib/helpers';
 import { OCCASIONS } from '@/lib/constants';
 import type { Book } from '@/lib/types';
 
@@ -12,12 +12,31 @@ interface LibraryViewProps {
   userId: string;
   onSelectBook: (item: any) => void;
   onUpdateOccasion: (id: string, occasion: string | null) => void;
+  focusFilter?: { id: string; nonce: number } | null;
 }
 
-export default function LibraryView({ library, uniqueShelves, userId, onSelectBook, onUpdateOccasion }: LibraryViewProps) {
+// Small "due in N days / overdue" chip for a borrowed book.
+function DueChip({ due }: { due: string }) {
+    const days = dueInDays(due);
+    if (days === null) return null;
+    const tone = days < 0 ? 'bg-rose-100 text-rose-600' : days <= 3 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500';
+    const label = days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? 'Due today' : `Due in ${days}d`;
+    return (
+        <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 shrink-0 ${tone}`}>
+            <Clock size={9} /> {label}
+        </span>
+    );
+}
+
+export default function LibraryView({ library, uniqueShelves, userId, onSelectBook, onUpdateOccasion, focusFilter }: LibraryViewProps) {
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState('owned');
     const [copied, setCopied] = useState(false);
+
+    // Let another tab (the Home "books due" nudge) jump us to a filter.
+    useEffect(() => {
+        if (focusFilter) setFilter(focusFilter.id);
+    }, [focusFilter?.nonce]);
 
     const handleShareRegistry = () => {
         const url = `${window.location.origin}/registry/${userId}`;
@@ -128,6 +147,7 @@ export default function LibraryView({ library, uniqueShelves, userId, onSelectBo
                                             )}
                                             {filter === 'all' && book.ownership_status === 'borrowed' && (<div className="px-1.5 py-0.5 bg-indigo-100 rounded-md"><StickyNote size={10} className="text-indigo-600" /></div>)}
                                             {(filter === 'all' || filter === 'wishlist') && book.in_wishlist && (<div className="px-1.5 py-0.5 bg-orange-100 rounded-md"><Gift size={10} className="text-orange-600" /></div>)}
+                                            {book.ownership_status === 'borrowed' && book.due_date && <DueChip due={book.due_date} />}
                                         </div>
                                         <p className="text-xs text-slate-500 font-medium truncate">{book.author}</p>
                                     </div>

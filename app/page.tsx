@@ -16,6 +16,11 @@ import MagicLogModal from '@/components/MagicLogModal';
 import YearInReview from '@/components/YearInReview';
 import { supabase } from '@/lib/supabaseClient';
 import { getStoredPin, storePin, clearStoredPin, PinRecord } from '@/lib/pin';
+import { uploadMemoryPhoto } from '@/lib/uploadMemoryPhoto';
+
+// A log id is "pending" (optimistic, not yet persisted) until the DB row swaps
+// in. Temp ids are prefixed with "temp"; guard edits that need a real row id.
+const isPendingLogId = (id: string | number) => typeof id === 'string' && id.startsWith('temp');
 
 import { MILESTONES } from '@/lib/constants';
 import type { Tab, Book, ReadingLog, DisplayItem } from '@/lib/types';
@@ -37,6 +42,7 @@ export default function Home() {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   
   const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [libraryFocus, setLibraryFocus] = useState<{ id: string; nonce: number } | null>(null);
   const [showReaderMenu, setShowReaderMenu] = useState(false);
   
   const [activeReader, setActiveReader] = useState(''); 
@@ -130,18 +136,25 @@ export default function Home() {
 
     const ctx = { lifetime: stats.lifetimeCount, streak: streak.current };
     const unlocked = MILESTONES.filter(m => m.test(ctx)).map(m => m.id);
+    // First-ever solo read for this reader, computed straight from the logs.
+    const hasSolo = logs.some(l => l.reader_name === activeReader && l.read_mode === 'by_child' && l.timestamp);
+    if (hasSolo) unlocked.push('first-solo');
     const newly = unlocked.filter(id => !stored.includes(id));
     if (newly.length === 0) return;
 
     try { localStorage.setItem(key, JSON.stringify(unlocked)); } catch { /* ignore */ }
 
     if (celebratedInit.current.has(activeReader)) {
-      const top = MILESTONES.filter(m => newly.includes(m.id)).pop();
-      if (top) setMilestoneToast({ id: top.id, label: top.label, emoji: top.emoji });
+      if (newly.includes('first-solo')) {
+        setMilestoneToast({ id: 'first-solo', label: 'First Solo Read! 🌟', emoji: '🌟' });
+      } else {
+        const top = MILESTONES.filter(m => newly.includes(m.id)).pop();
+        if (top) setMilestoneToast({ id: top.id, label: top.label, emoji: top.emoji });
+      }
     } else {
       celebratedInit.current.add(activeReader);
     }
-  }, [stats.lifetimeCount, streak.current, activeReader, session]);
+  }, [stats.lifetimeCount, streak.current, activeReader, session, logs]);
 
   // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {
@@ -219,7 +232,7 @@ export default function Home() {
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
   // --- FIXED: ADD BOOK LOGIC (Optimistic Updates) ---
-  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string) => {
+  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string, quote: string = '', photoFile: File | null = null, readMode: string = 'to_child') => {
     setAddModalOpen(false);
     if (!session) return;
 
@@ -272,6 +285,8 @@ export default function Home() {
                 reader_name: reader,
                 timestamp,
                 notes: note || undefined,
+                quote: quote || undefined,
+                read_mode: readMode,
             };
         });
         setLogs(prev => [...newOptimisticLogs, ...prev]);
@@ -306,13 +321,22 @@ export default function Home() {
 
     // 5. BACKGROUND: Insert Logs to DB
     if (!isWishlist && shouldLog) {
+        // Upload the memory photo first (if any) so its URL goes in with the logs.
+        let photoUrl: string | null = null;
+        if (photoFile) {
+            try { photoUrl = await uploadMemoryPhoto(photoFile, session.user.id); }
+            catch { showToast("Saved, but the photo didn't upload."); }
+        }
         const newLogs = readersToAdd.map(reader => ({
             user_id: session.user.id,
             book_title: book.title,
             book_author: book.author,
             reader_name: reader,
             timestamp: timestamp,
-            notes: note || null
+            notes: note || null,
+            quote: quote || null,
+            photo_url: photoUrl,
+            read_mode: readMode,
         }));
 
         const { data: insertedLogs, error: logError } = await supabase.from('reading_logs').insert(newLogs).select();
@@ -336,12 +360,13 @@ export default function Home() {
       if (!session) return; 
       
       const timestamp = new Date().toISOString();
-      const newLog = { 
-          user_id: session.user.id, 
-          book_title: book.title, 
-          book_author: book.author, 
-          reader_name: activeReader, 
-          timestamp: timestamp 
+      const newLog = {
+          user_id: session.user.id,
+          book_title: book.title,
+          book_author: book.author,
+          reader_name: activeReader,
+          timestamp: timestamp,
+          read_mode: 'to_child'
       };
 
       // Optimistic Update
@@ -358,18 +383,19 @@ export default function Home() {
       }
   };
 
-  const handleReadAgain = async (book: any) => {
-      if (!session) return; 
-      const title = book.title || book.book_title; 
-      const author = book.author || book.book_author; 
+  const handleReadAgain = async (book: any, readMode: string = 'to_child') => {
+      if (!session) return;
+      const title = book.title || book.book_title;
+      const author = book.author || book.book_author;
       const timestamp = new Date().toISOString();
 
-      const newLog = { 
-          user_id: session.user.id, 
-          book_title: title, 
-          book_author: author, 
-          reader_name: activeReader, 
-          timestamp: timestamp
+      const newLog = {
+          user_id: session.user.id,
+          book_title: title,
+          book_author: author,
+          reader_name: activeReader,
+          timestamp: timestamp,
+          read_mode: readMode
       };
 
       // Optimistic
@@ -414,12 +440,29 @@ export default function Home() {
       }
   };
   
-  const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => { 
+  const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => {
+      // A due date only makes sense for a borrowed book; drop it when the book
+      // becomes owned.
+      const clearsDue = newStatus === 'owned';
       // Optimistic
-      setLibrary(prev => prev.map(b => b.id === id ? { ...b, ownership_status: newStatus } : b)); 
-      setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null); 
+      setLibrary(prev => prev.map(b => b.id === id ? { ...b, ownership_status: newStatus, ...(clearsDue ? { due_date: null } : {}) } : b));
+      setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus, ...(clearsDue ? { due_date: null } : {}) }) : null);
       // DB
-      await supabase.from('library').update({ ownership_status: newStatus }).eq('id', id); 
+      await supabase.from('library').update({ ownership_status: newStatus, ...(clearsDue ? { due_date: null } : {}) }).eq('id', id);
+  };
+
+  const handleUpdateDueDate = async (id: string, due: string | null) => {
+      const prev = library.find(b => b.id === id)?.due_date ?? null;
+      // Optimistic
+      setLibrary(cur => cur.map(b => b.id === id ? { ...b, due_date: due } : b));
+      setSelectedBook(cur => cur ? { ...cur, due_date: due } : null);
+      // DB
+      const { error } = await supabase.from('library').update({ due_date: due }).eq('id', id);
+      if (error) {
+          setLibrary(cur => cur.map(b => b.id === id ? { ...b, due_date: prev } : b));
+          setSelectedBook(cur => cur ? { ...cur, due_date: prev } : null);
+          showToast("Couldn't update the due date.");
+      }
   };
 
   const handleUpdateWishlist = async (id: string, inWishlist: boolean) => {
@@ -468,6 +511,27 @@ export default function Home() {
       if (error) showToast("Couldn't update the date. Please try again.");
   };
 
+  // Attach a photo and/or quote to an existing read (Reading Memories).
+  const handleAddMemory = async (logId: string | number, memory: { quote?: string; file?: File | null }) => {
+      if (!session) return;
+      if (isPendingLogId(logId)) { showToast('Give that read a moment to save, then add the memory.'); return; }
+      const prevLog = logs.find(l => l.id === logId);
+      let photoUrl: string | null = prevLog?.photo_url ?? null;
+      if (memory.file) {
+          try { photoUrl = await uploadMemoryPhoto(memory.file, session.user.id); }
+          catch { showToast("The photo didn't upload. Please try again."); return; }
+      }
+      const quote = memory.quote?.trim() || prevLog?.quote || null;
+      // Optimistic
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, photo_url: photoUrl, quote } : l));
+      const { error } = await supabase.from('reading_logs').update({ photo_url: photoUrl, quote }).eq('id', logId);
+      if (error) {
+          // Roll back to the prior values.
+          setLogs(prev => prev.map(l => l.id === logId ? { ...l, photo_url: prevLog?.photo_url ?? null, quote: prevLog?.quote ?? null } : l));
+          showToast("Couldn't save that memory. Please try again.");
+      }
+  };
+
   // --- Chapter books ("Currently Reading") ---
   const handleStartReading = async (book: { title: string; author: string }, startIso: string) => {
       if (!session) return;
@@ -498,11 +562,12 @@ export default function Home() {
       if (error) showToast("Couldn't update the start date.");
   };
 
-  const handleFinishReading = async (logId: string | number, finishIso: string) => {
-      setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: finishIso } : l));
-      const { error } = await supabase.from('reading_logs').update({ timestamp: finishIso }).eq('id', logId);
+  const handleFinishReading = async (logId: string | number, finishIso: string, readMode: string = 'to_child') => {
+      const prevMode = logs.find(l => l.id === logId)?.read_mode ?? 'to_child';
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: finishIso, read_mode: readMode } : l));
+      const { error } = await supabase.from('reading_logs').update({ timestamp: finishIso, read_mode: readMode }).eq('id', logId);
       if (error) {
-          setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: null as any } : l));
+          setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: null as any, read_mode: prevMode } : l));
           showToast("Couldn't finish that book. Please try again.");
       } else {
           showToast('Nice — book finished! 🎉');
@@ -582,7 +647,7 @@ export default function Home() {
       // Only completed reads appear in history; in-progress chapter books show
       // in the "Currently reading" control instead.
       return logs.filter(l => l.book_title === selectedBook.title && l.timestamp).map(l => ({
-            id: l.id, title: l.book_title, author: l.book_author, reader: l.reader_name, timestamp: l.timestamp, notes: l.notes, started_at: l.started_at
+            id: l.id, title: l.book_title, author: l.book_author, reader: l.reader_name, timestamp: l.timestamp, notes: l.notes, started_at: l.started_at, photo_url: l.photo_url, quote: l.quote
         } as any)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [selectedBook, logs]);
 
@@ -659,6 +724,7 @@ export default function Home() {
             userId={session.user.id}
             onSelectBook={setSelectedBook}
             onUpdateOccasion={handleUpdateOccasion}
+            focusFilter={libraryFocus}
           />
         ) : activeTab === 'home' ? (
           <HomeView
@@ -669,6 +735,7 @@ export default function Home() {
             getBookCover={getBookCover}
             onSelectBook={setSelectedBook}
             onFinishReading={handleFinishReading}
+            onViewBorrowed={() => { setLibraryFocus({ id: 'borrowed', nonce: Date.now() }); setActiveTab('library'); }}
           />
         ) : (
           <HistoryView
@@ -739,12 +806,14 @@ export default function Home() {
         onReadAgain={handleReadAgain} 
         onRemove={handleRemoveBook} 
         onDeleteAsset={handleDeleteAsset} 
-        onUpdateStatus={handleUpdateStatus} 
-        onUpdateWishlist={handleUpdateWishlist} 
+        onUpdateStatus={handleUpdateStatus}
+        onUpdateDueDate={handleUpdateDueDate}
+        onUpdateWishlist={handleUpdateWishlist}
         onUpdateRating={handleUpdateRating} 
         onUpdateMemo={handleUpdateMemo}
         onUpdateShelves={handleUpdateShelves}
         onUpdateLogDate={handleUpdateLogDate}
+        onAddMemory={handleAddMemory}
         allShelves={uniqueShelves}
         activeReader={activeReader}
         activeReading={selectedBookActiveReading}

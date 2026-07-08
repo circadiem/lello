@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Star, Library, Clock } from 'lucide-react';
+import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Star, Library, Clock, Camera, Quote } from 'lucide-react';
+import { READ_MODES } from '@/lib/constants';
 
 // Local yyyy-MM-dd for <input type="date"> and conversion back to an ISO
 // timestamp anchored at local noon (avoids a timezone day-shift).
@@ -30,7 +31,7 @@ export interface GoogleBook {
 interface AddBookModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso: string) => void;
+  onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso: string, quote: string, photoFile: File | null, readMode: string) => void;
   readers: string[];
   activeReader: string;
   initialQuery?: string;
@@ -49,6 +50,9 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   const [logSession, setLogSession] = useState(true);
   const [note, setNote] = useState('');
   const [logDate, setLogDate] = useState(todayStr());
+  const [quote, setQuote] = useState('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [readMode, setReadMode] = useState<string>('to_child');
   const [showAllResults, setShowAllResults] = useState(false);
 
   useEffect(() => {
@@ -61,6 +65,9 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         setLogSession(true);
         setNote('');
         setLogDate(todayStr());
+        setQuote('');
+        setPhotoFile(null);
+        setReadMode('to_child');
         setShowAllResults(false);
         setOwnershipStatus('owned');
         if (activeReader && activeReader !== 'Parents') {
@@ -131,7 +138,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
   const handleFinalAdd = () => {
       if (selectedBook) {
-          onAdd(selectedBook, selectedReaders, ownershipStatus, logSession, note, dateInputToIso(logDate));
+          onAdd(selectedBook, selectedReaders, ownershipStatus, logSession, note, dateInputToIso(logDate), quote, photoFile, readMode);
       }
   };
 
@@ -318,14 +325,67 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                     )}
 
                     {logSession && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Who read it?</label>
+                            <div className="flex p-1 bg-slate-100 rounded-2xl">
+                                {READ_MODES.map(m => (
+                                    <button
+                                        key={m.id}
+                                        onClick={() => setReadMode(m.id)}
+                                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${readMode === m.id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <span>{m.emoji}</span> {m.short}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {logSession && (
                         <div className="relative">
                             <MessageSquare size={16} className="absolute left-4 top-4 text-slate-400" />
-                            <textarea 
+                            <textarea
                                 placeholder="Optional: What did they think?"
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-slate-900 resize-none h-20"
                                 value={note}
                                 onChange={(e) => setNote(e.target.value)}
                             />
+                        </div>
+                    )}
+
+                    {/* Reading Memory: quote + photo */}
+                    {logSession && (
+                        <div className="space-y-2">
+                            <div className="relative">
+                                <Quote size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder="A funny thing they said…"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-slate-900"
+                                    value={quote}
+                                    onChange={(e) => setQuote(e.target.value)}
+                                />
+                            </div>
+                            {photoFile ? (
+                                <div className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                                    <img src={URL.createObjectURL(photoFile)} className="w-12 h-12 rounded-lg object-cover" alt="Memory preview" />
+                                    <span className="flex-1 text-xs font-bold text-slate-500 truncate">Photo attached</span>
+                                    <button onClick={() => setPhotoFile(null)} className="p-2 text-slate-400 hover:text-rose-500" aria-label="Remove photo">
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            ) : (
+                                <label className="flex items-center justify-center gap-2 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm font-bold text-slate-500 cursor-pointer hover:bg-slate-100 transition-colors">
+                                    <Camera size={16} /> Add a photo
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        capture="environment"
+                                        className="hidden"
+                                        onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                                    />
+                                </label>
+                            )}
                         </div>
                     )}
                 </div>

@@ -17,6 +17,7 @@ export interface Book {
   rating: number;
   memo: string | null;
   shelves?: string[];
+  due_date?: string | null;   // library due date (meaningful only when borrowed)
   created_at?: string;
 }
 
@@ -30,6 +31,9 @@ export interface ReadingLog {
   count?: number;
   notes?: string;
   started_at?: string | null; // set for chapter books (start date)
+  photo_url?: string | null;  // Reading Memories: attached photo
+  quote?: string | null;      // Reading Memories: memorable quote
+  read_mode?: string;         // who-read-to-whom: to_child | together | by_child
 }
 
 export interface DisplayItem {
@@ -47,5 +51,6 @@ export interface DisplayItem {
   rating?: number;
   memo?: string;
   shelves?: string[];
+  due_date?: string | null;
   dailyCount?: number;
 }
