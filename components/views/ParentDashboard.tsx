@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
-import { Settings, Edit3, Trash2, UserPlus, LogOut } from 'lucide-react';
+import React, { useState } from 'react';
+import { Settings, Edit3, Trash2, UserPlus, LogOut, Users, Check, Copy, Loader2 } from 'lucide-react';
 import { getAvatarUrl } from '@/lib/helpers';
+import { supabase } from '@/lib/supabaseClient';
 
 interface ParentDashboardProps {
   readers: string[];
@@ -24,6 +25,26 @@ export default function ParentDashboard({
   onOpenAvatar, onDeleteChild, onUpdateChildGoal, onAddChild,
   onShowYearReview, onChangePin, onResetApp, onLogout, onExitParentMode,
 }: ParentDashboardProps) {
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const handleInvite = async () => {
+    setInviteLoading(true);
+    setInviteError('');
+    const { data, error } = await supabase.rpc('create_household_invite');
+    setInviteLoading(false);
+    if (error || !data) { setInviteError('Could not create an invite. Please try again.'); return; }
+    setInviteCode(data as string);
+  };
+  const copyCode = () => {
+    if (!inviteCode) return;
+    navigator.clipboard.writeText(inviteCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
       <div className="animate-in fade-in zoom-in-95 duration-300 pb-20">
           <div className="flex items-center gap-4 py-6 mb-4">
@@ -55,6 +76,25 @@ export default function ParentDashboard({
               >
                   ✨ {new Date().getFullYear()} Year in Books
               </button>
+
+              <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                  <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">Household</h3>
+                  {inviteCode ? (
+                      <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
+                          <p className="text-xs font-bold text-emerald-700 mb-2">Share this code with your partner — it expires in 7 days.</p>
+                          <div className="flex items-center gap-2">
+                              <div className="flex-1 bg-white border border-emerald-200 rounded-xl py-3 text-center font-mono-tabular font-extrabold text-2xl tracking-[0.3em] text-slate-900">{inviteCode}</div>
+                              <button onClick={copyCode} className="w-12 h-12 rounded-xl bg-slate-900 text-white flex items-center justify-center active:scale-95 transition-transform shrink-0">{copied ? <Check size={18} /> : <Copy size={18} />}</button>
+                          </div>
+                          <p className="text-[11px] text-slate-500 font-medium mt-2">When they sign up, they choose “Join with an invite code” and enter this.</p>
+                      </div>
+                  ) : (
+                      <button onClick={handleInvite} disabled={inviteLoading} className="w-full py-3 bg-slate-100 text-slate-900 font-bold rounded-xl text-sm hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
+                          {inviteLoading ? <Loader2 size={16} className="animate-spin" /> : <Users size={16} />} Invite a partner
+                      </button>
+                  )}
+                  {inviteError && <p className="text-rose-500 text-xs font-bold mt-2">{inviteError}</p>}
+              </section>
 
               <section className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
                   <h3 className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase mb-4">System</h3>

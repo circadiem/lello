@@ -45,7 +45,11 @@ export default function Home() {
   const [libraryFocus, setLibraryFocus] = useState<{ id: string; nonce: number } | null>(null);
   const [showReaderMenu, setShowReaderMenu] = useState(false);
   
-  const [activeReader, setActiveReader] = useState(''); 
+  const [activeReader, setActiveReader] = useState('');
+  // Id of the household's canonical profile (the first member's). Profile
+  // writes target this, not necessarily the signed-in user — so both parents
+  // in a household edit the same shared family config.
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [readers, setReaders] = useState(['Leo', 'Maya', 'Parents']);
   const [readerGoals, setReaderGoals] = useState<Record<string, { daily: number, weekly: number }>>({});
   const [readerAvatars, setReaderAvatars] = useState<Record<string, string>>({});
@@ -99,12 +103,17 @@ export default function Home() {
   }, [session]);
 
   const fetchData = async (userId: string) => {
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (!profile) { setNeedsOnboarding(true); setReaders([]); } else {
+      // Read the household's canonical profile (the oldest one RLS lets us see).
+      // For a solo family that's simply the user's own profile; for a joined
+      // partner it's the first parent's profile (their empty one is ignored).
+      const { data: profiles } = await supabase.from('profiles').select('*').order('created_at', { ascending: true }).limit(1);
+      const profile = profiles?.[0];
+      if (!profile) { setNeedsOnboarding(true); setReaders([]); setProfileId(null); } else {
+          setProfileId(profile.id);
           const profileReaders = profile.readers || [];
           setReaders(profileReaders);
           setReaderGoals(profile.goals || {});
-          setReaderAvatars(profile.avatars || {}); 
+          setReaderAvatars(profile.avatars || {});
           if (!activeReader && profileReaders.length > 0) setActiveReader(profileReaders[0]);
       }
       const { data: libData } = await supabase.from('library').select('*');
@@ -186,6 +195,7 @@ export default function Home() {
   };
   const handleAddChildClick = () => setChildModalOpen(true);
   const handleSaveChild = async (name: string, avatar: string | null) => {
+      if (!profileId) return;
       if (!readers.includes(name)) {
           const parentName = readers.length > 0 ? readers[readers.length - 1] : 'Parents';
           const kids = readers.slice(0, -1);
@@ -193,8 +203,9 @@ export default function Home() {
           const newGoals = { ...readerGoals, [name]: { daily: 2, weekly: 10 } };
           const newAvatars = { ...readerAvatars };
           if (avatar) newAvatars[name] = avatar;
-          await supabase.from('profiles').update({ readers: newReaders, goals: newGoals, avatars: newAvatars }).eq('id', session.user.id);
           setReaders(newReaders); setReaderGoals(newGoals); setReaderAvatars(newAvatars);
+          const { error } = await supabase.from('profiles').update({ readers: newReaders, goals: newGoals, avatars: newAvatars }).eq('id', profileId);
+          if (error) showToast("Couldn't save that child. Please try again.");
       }
   };
   const handleDeleteChild = async (name: string) => {
@@ -209,9 +220,11 @@ export default function Home() {
       setReaderAvatars(newAvatars);
       setLogs(prev => prev.filter(l => l.reader_name !== name));
       if (activeReader === name) setActiveReader(newReaders[0] || '');
-      // Persist: profile + cascade-delete this reader's logs (RLS scopes to user)
-      await supabase.from('profiles').update({ readers: newReaders, goals: newGoals, avatars: newAvatars }).eq('id', session.user.id);
-      await supabase.from('reading_logs').delete().eq('user_id', session.user.id).eq('reader_name', name);
+      // Persist: shared family profile + cascade-delete this reader's logs.
+      // The log delete is household-scoped by RLS (no user_id filter) so a
+      // child's reads logged by either parent are all removed.
+      if (profileId) await supabase.from('profiles').update({ readers: newReaders, goals: newGoals, avatars: newAvatars }).eq('id', profileId);
+      await supabase.from('reading_logs').delete().eq('reader_name', name);
   };
   const handleResetApp = async () => {
       if (!session) return;
@@ -225,11 +238,11 @@ export default function Home() {
       setPinRecord(null);
       await supabase.auth.signOut();
   };
-  const handleUpdateChildGoal = async (child: string, type: 'daily' | 'weekly', value: number) => { const newGoals = { ...readerGoals, [child]: { ...(readerGoals[child] || readerGoals['default']), [type]: value } }; setReaderGoals(newGoals); await supabase.from('profiles').update({ goals: newGoals }).eq('id', session.user.id); };
+  const handleUpdateChildGoal = async (child: string, type: 'daily' | 'weekly', value: number) => { if (!profileId) return; const newGoals = { ...readerGoals, [child]: { ...(readerGoals[child] || readerGoals['default']), [type]: value } }; setReaderGoals(newGoals); await supabase.from('profiles').update({ goals: newGoals }).eq('id', profileId); };
   const handleGoalSave = (newGoal: number) => handleUpdateChildGoal(activeReader, editingGoalType, newGoal);
   const handleLogout = async () => { await supabase.auth.signOut(); };
   const handleOpenAvatarModal = (name: string) => { setEditingAvatarFor(name); setAvatarModalOpen(true); };
-  const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
+  const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor || !profileId) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', profileId); };
 
   // --- FIXED: ADD BOOK LOGIC (Optimistic Updates) ---
   const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string, quote: string = '', photoFile: File | null = null, readMode: string = 'to_child') => {
