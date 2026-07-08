@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { BookOpen, Plus } from 'lucide-react';
 import ReadingChart from '@/components/ReadingChart';
 import StreakCard from '@/components/StreakCard';
+import { READ_MODES } from '@/lib/constants';
 
 interface HistoryViewProps {
   stats: { dailyCount: number; weeklyCount: number; goals: { daily: number; weekly: number }; readerLog: any[] };
@@ -35,11 +36,16 @@ export default function HistoryView({
                 {items.map((item: any) => (
                     <div key={item.id} className="w-full bg-white p-4 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
                         <button onClick={() => onSelectBook(item)} className="flex items-center gap-4 flex-1 text-left">
-                            <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden">
+                            <div className={`w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 border border-emerald-200 shadow-sm shrink-0 overflow-hidden ${item.read_mode === 'by_child' ? 'ring-2 ring-amber-300' : ''}`}>
                                 {item.cover ? <img src={item.cover} className="w-full h-full object-cover" /> : <BookOpen size={20} />}
                             </div>
                             <div className="flex-1 min-w-0 pr-2">
-                                <p className="font-bold text-slate-900 line-clamp-1">{item.title}</p>
+                                <p className="font-bold text-slate-900 line-clamp-1">
+                                    {item.title}
+                                    {item.read_mode && item.read_mode !== 'to_child' && (
+                                        <span className="ml-1">{READ_MODES.find(m => m.id === item.read_mode)?.emoji}</span>
+                                    )}
+                                </p>
                                 <p className="text-xs text-slate-500 font-medium line-clamp-1">{item.author}</p>
                             </div>
                         </button>

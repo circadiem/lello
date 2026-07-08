@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Search, BookOpen, Loader2, AlertCircle, Check, Plus, Gift, CalendarCheck, MessageSquare, ChevronDown, Star, Library, Clock, Camera, Quote } from 'lucide-react';
+import { READ_MODES } from '@/lib/constants';
 
 // Local yyyy-MM-dd for <input type="date"> and conversion back to an ISO
 // timestamp anchored at local noon (avoids a timezone day-shift).
@@ -30,7 +31,7 @@ export interface GoogleBook {
 interface AddBookModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso: string, quote: string, photoFile: File | null) => void;
+  onAdd: (book: GoogleBook, readers: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso: string, quote: string, photoFile: File | null, readMode: string) => void;
   readers: string[];
   activeReader: string;
   initialQuery?: string;
@@ -51,6 +52,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
   const [logDate, setLogDate] = useState(todayStr());
   const [quote, setQuote] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [readMode, setReadMode] = useState<string>('to_child');
   const [showAllResults, setShowAllResults] = useState(false);
 
   useEffect(() => {
@@ -65,6 +67,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
         setLogDate(todayStr());
         setQuote('');
         setPhotoFile(null);
+        setReadMode('to_child');
         setShowAllResults(false);
         setOwnershipStatus('owned');
         if (activeReader && activeReader !== 'Parents') {
@@ -135,7 +138,7 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
 
   const handleFinalAdd = () => {
       if (selectedBook) {
-          onAdd(selectedBook, selectedReaders, ownershipStatus, logSession, note, dateInputToIso(logDate), quote, photoFile);
+          onAdd(selectedBook, selectedReaders, ownershipStatus, logSession, note, dateInputToIso(logDate), quote, photoFile, readMode);
       }
   };
 
@@ -318,6 +321,23 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
                                 onChange={(e) => setLogDate(e.target.value)}
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900"
                             />
+                        </div>
+                    )}
+
+                    {logSession && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Who read it?</label>
+                            <div className="flex p-1 bg-slate-100 rounded-2xl">
+                                {READ_MODES.map(m => (
+                                    <button
+                                        key={m.id}
+                                        onClick={() => setReadMode(m.id)}
+                                        className={`flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${readMode === m.id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <span>{m.emoji}</span> {m.short}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
 

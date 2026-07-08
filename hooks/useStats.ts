@@ -110,6 +110,7 @@ export function useStats({
                   timestamp: item.timestamp,
                   reader: item.reader_name,
                   notes: item.notes,
+                  read_mode: item.read_mode,
                   ownershipStatus: libBook ? libBook.ownership_status : 'wishlist',
                   shelves: libBook ? libBook.shelves : []
               };

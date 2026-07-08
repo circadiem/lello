@@ -13,3 +13,10 @@ export const MILESTONES: (Milestone & { test: (s: { lifetime: number; streak: nu
 
 // Wish-list gifting occasions (chips on the library row + public registry).
 export const OCCASIONS = ['Birthday', 'Holiday', 'Just Because'];
+
+// Who-read-to-whom on a reading log.
+export const READ_MODES = [
+  { id: 'to_child', label: 'I read to them', short: 'Read to', emoji: '🗣️' },
+  { id: 'together', label: 'We read together', short: 'Together', emoji: '👥' },
+  { id: 'by_child', label: 'They read it themselves!', short: 'Solo', emoji: '🌟' },
+] as const;

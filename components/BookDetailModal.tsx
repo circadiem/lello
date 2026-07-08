@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, BookOpen, Trash2, Clock, StickyNote, Calendar, Star, Library, Plus, Gift, Tag, BookMarked, Camera } from 'lucide-react';
 import { daysBetween } from '@/lib/helpers';
+import { READ_MODES } from '@/lib/constants';
 
 // ISO <-> yyyy-MM-dd for <input type="date">, anchoring rebuilt timestamps at
 // local noon so a date edit never shifts across a timezone boundary.
@@ -54,7 +55,7 @@ interface BookDetailModalProps {
   book: DisplayItem | null; 
   history: HistoryItem[];
   onClose: () => void;
-  onReadAgain: (book: any) => void;
+  onReadAgain: (book: any, readMode?: string) => void;
   onRemove: (id: string | number) => void;
   onDeleteAsset: (id: string | number, title: string) => void;
   onUpdateStatus: (id: string, status: 'owned' | 'borrowed') => void;
@@ -68,7 +69,7 @@ interface BookDetailModalProps {
   activeReading?: ActiveReading | null;
   onStartReading?: (book: { title: string; author: string }, startIso: string) => void;
   onUpdateStartDate?: (logId: string | number, iso: string) => void;
-  onFinishReading?: (logId: string | number, finishIso: string) => void;
+  onFinishReading?: (logId: string | number, finishIso: string, readMode?: string) => void;
   onCancelReading?: (logId: string | number) => void;
   onAddMemory?: (logId: string | number, memory: { quote?: string; file?: File | null }) => void;
 }
@@ -92,6 +93,8 @@ export default function BookDetailModal({
     const [memoryQuote, setMemoryQuote] = useState('');
     const [memoryFile, setMemoryFile] = useState<File | null>(null);
     const [photoOverlay, setPhotoOverlay] = useState<string | null>(null);
+    const [readMode, setReadMode] = useState<string>('to_child');
+    const [finishMode, setFinishMode] = useState<string>('to_child');
     const [finishDate, setFinishDate] = useState('');
     const [showStartPicker, setShowStartPicker] = useState(false);
     const [startDate, setStartDate] = useState('');
@@ -103,6 +106,7 @@ export default function BookDetailModal({
             setShelves(book.shelves || []);
             setNewShelf('');
             setFinishDate(isoToDateInput(new Date().toISOString()));
+            setFinishMode('to_child');
             setShowStartPicker(false);
             setStartDate(isoToDateInput(new Date().toISOString()));
         }
@@ -265,6 +269,13 @@ export default function BookDetailModal({
                                                 aria-label="Start date"
                                             />
                                         </div>
+                                        <div className="flex gap-1 p-1 bg-amber-100/60 rounded-xl mb-2">
+                                            {READ_MODES.map(m => (
+                                                <button key={m.id} onClick={() => setFinishMode(m.id)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all ${finishMode === m.id ? 'bg-white shadow-sm text-slate-900' : 'text-amber-700/70 hover:text-amber-800'}`}>
+                                                    <span>{m.emoji}</span><span>{m.short}</span>
+                                                </button>
+                                            ))}
+                                        </div>
                                         <div className="flex gap-2 items-center">
                                             <input
                                                 type="date"
@@ -275,7 +286,7 @@ export default function BookDetailModal({
                                                 className="flex-1 bg-white border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 focus:outline-none"
                                             />
                                             <button
-                                                onClick={() => finishDate && onFinishReading?.(activeReading.id, dateInputToIso(finishDate))}
+                                                onClick={() => finishDate && onFinishReading?.(activeReading.id, dateInputToIso(finishDate), finishMode)}
                                                 className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold active:scale-95 transition-transform"
                                             >
                                                 Finish
@@ -519,7 +530,17 @@ export default function BookDetailModal({
                         
                         {/* Actions */}
                         <div className="mt-8 space-y-4">
-                            <button onClick={() => onReadAgain(book)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Who's reading it this time?</label>
+                                <div className="flex p-1 bg-slate-100 rounded-2xl">
+                                    {READ_MODES.map(m => (
+                                        <button key={m.id} onClick={() => setReadMode(m.id)} className={`flex-1 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${readMode === m.id ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}>
+                                            <span>{m.emoji}</span> {m.short}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <button onClick={() => onReadAgain(book, readMode)} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
                                 <Plus size={20} strokeWidth={3} />
                                 Log Another Read
                             </button>

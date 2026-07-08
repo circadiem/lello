@@ -32,6 +32,7 @@ export interface ReadingLog {
   started_at?: string | null; // set for chapter books (start date)
   photo_url?: string | null;  // Reading Memories: attached photo
   quote?: string | null;      // Reading Memories: memorable quote
+  read_mode?: string;         // who-read-to-whom: to_child | together | by_child
 }
 
 export interface DisplayItem {

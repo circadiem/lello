@@ -135,18 +135,25 @@ export default function Home() {
 
     const ctx = { lifetime: stats.lifetimeCount, streak: streak.current };
     const unlocked = MILESTONES.filter(m => m.test(ctx)).map(m => m.id);
+    // First-ever solo read for this reader, computed straight from the logs.
+    const hasSolo = logs.some(l => l.reader_name === activeReader && l.read_mode === 'by_child' && l.timestamp);
+    if (hasSolo) unlocked.push('first-solo');
     const newly = unlocked.filter(id => !stored.includes(id));
     if (newly.length === 0) return;
 
     try { localStorage.setItem(key, JSON.stringify(unlocked)); } catch { /* ignore */ }
 
     if (celebratedInit.current.has(activeReader)) {
-      const top = MILESTONES.filter(m => newly.includes(m.id)).pop();
-      if (top) setMilestoneToast({ id: top.id, label: top.label, emoji: top.emoji });
+      if (newly.includes('first-solo')) {
+        setMilestoneToast({ id: 'first-solo', label: 'First Solo Read! 🌟', emoji: '🌟' });
+      } else {
+        const top = MILESTONES.filter(m => newly.includes(m.id)).pop();
+        if (top) setMilestoneToast({ id: top.id, label: top.label, emoji: top.emoji });
+      }
     } else {
       celebratedInit.current.add(activeReader);
     }
-  }, [stats.lifetimeCount, streak.current, activeReader, session]);
+  }, [stats.lifetimeCount, streak.current, activeReader, session, logs]);
 
   // --- Handlers ---
   const handleReaderChangeRequest = (name: string) => {
@@ -224,7 +231,7 @@ export default function Home() {
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
   // --- FIXED: ADD BOOK LOGIC (Optimistic Updates) ---
-  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string, quote: string = '', photoFile: File | null = null) => {
+  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string, quote: string = '', photoFile: File | null = null, readMode: string = 'to_child') => {
     setAddModalOpen(false);
     if (!session) return;
 
@@ -278,6 +285,7 @@ export default function Home() {
                 timestamp,
                 notes: note || undefined,
                 quote: quote || undefined,
+                read_mode: readMode,
             };
         });
         setLogs(prev => [...newOptimisticLogs, ...prev]);
@@ -327,6 +335,7 @@ export default function Home() {
             notes: note || null,
             quote: quote || null,
             photo_url: photoUrl,
+            read_mode: readMode,
         }));
 
         const { data: insertedLogs, error: logError } = await supabase.from('reading_logs').insert(newLogs).select();
@@ -350,12 +359,13 @@ export default function Home() {
       if (!session) return; 
       
       const timestamp = new Date().toISOString();
-      const newLog = { 
-          user_id: session.user.id, 
-          book_title: book.title, 
-          book_author: book.author, 
-          reader_name: activeReader, 
-          timestamp: timestamp 
+      const newLog = {
+          user_id: session.user.id,
+          book_title: book.title,
+          book_author: book.author,
+          reader_name: activeReader,
+          timestamp: timestamp,
+          read_mode: 'to_child'
       };
 
       // Optimistic Update
@@ -372,18 +382,19 @@ export default function Home() {
       }
   };
 
-  const handleReadAgain = async (book: any) => {
-      if (!session) return; 
-      const title = book.title || book.book_title; 
-      const author = book.author || book.book_author; 
+  const handleReadAgain = async (book: any, readMode: string = 'to_child') => {
+      if (!session) return;
+      const title = book.title || book.book_title;
+      const author = book.author || book.book_author;
       const timestamp = new Date().toISOString();
 
-      const newLog = { 
-          user_id: session.user.id, 
-          book_title: title, 
-          book_author: author, 
-          reader_name: activeReader, 
-          timestamp: timestamp
+      const newLog = {
+          user_id: session.user.id,
+          book_title: title,
+          book_author: author,
+          reader_name: activeReader,
+          timestamp: timestamp,
+          read_mode: readMode
       };
 
       // Optimistic
@@ -533,11 +544,12 @@ export default function Home() {
       if (error) showToast("Couldn't update the start date.");
   };
 
-  const handleFinishReading = async (logId: string | number, finishIso: string) => {
-      setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: finishIso } : l));
-      const { error } = await supabase.from('reading_logs').update({ timestamp: finishIso }).eq('id', logId);
+  const handleFinishReading = async (logId: string | number, finishIso: string, readMode: string = 'to_child') => {
+      const prevMode = logs.find(l => l.id === logId)?.read_mode ?? 'to_child';
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: finishIso, read_mode: readMode } : l));
+      const { error } = await supabase.from('reading_logs').update({ timestamp: finishIso, read_mode: readMode }).eq('id', logId);
       if (error) {
-          setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: null as any } : l));
+          setLogs(prev => prev.map(l => l.id === logId ? { ...l, timestamp: null as any, read_mode: prevMode } : l));
           showToast("Couldn't finish that book. Please try again.");
       } else {
           showToast('Nice — book finished! 🎉');
