@@ -51,6 +51,20 @@ export const getAvatarUrl = (name: string, map: Record<string, string>) => {
     return `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`;
 };
 
+// Whole calendar days from today until a due date (negative = overdue,
+// 0 = due today). Compares y/m/d rather than raw ms so DST never shifts it.
+// Accepts a date-only string ('yyyy-MM-dd', how Postgres date columns arrive)
+// or a full ISO timestamp.
+export const dueInDays = (due?: string | null) => {
+    if (!due) return null;
+    const [y, m, d] = due.slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const dueDay = new Date(y, m - 1, d);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((dueDay.getTime() - today.getTime()) / 86400000);
+};
+
 // Inclusive whole-day count between two ISO timestamps (day 1 = same day).
 export const daysBetween = (aIso?: string | null, bIso?: string | null) => {
     if (!aIso || !bIso) return 0;

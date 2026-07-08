@@ -31,7 +31,8 @@ interface DisplayItem {
   inWishlist?: boolean;
   rating?: number;
   memo?: string;
-  shelves?: string[]; 
+  shelves?: string[];
+  due_date?: string | null;
 }
 
 interface HistoryItem {
@@ -59,6 +60,7 @@ interface BookDetailModalProps {
   onRemove: (id: string | number) => void;
   onDeleteAsset: (id: string | number, title: string) => void;
   onUpdateStatus: (id: string, status: 'owned' | 'borrowed') => void;
+  onUpdateDueDate?: (id: string, due: string | null) => void;
   onUpdateWishlist: (id: string, inWishlist: boolean) => void;
   onUpdateRating: (id: string, rating: number) => void;
   onUpdateMemo: (id: string, memo: string) => void;
@@ -76,7 +78,7 @@ interface BookDetailModalProps {
 
 export default function BookDetailModal({
     book, history, onClose, onReadAgain, onRemove, onDeleteAsset,
-    onUpdateStatus, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves,
+    onUpdateStatus, onUpdateDueDate, onUpdateWishlist, onUpdateRating, onUpdateMemo, onUpdateShelves,
     onUpdateLogDate, allShelves = [],
     activeReader, activeReading, onStartReading, onUpdateStartDate, onFinishReading, onCancelReading,
     onAddMemory
@@ -95,6 +97,7 @@ export default function BookDetailModal({
     const [photoOverlay, setPhotoOverlay] = useState<string | null>(null);
     const [readMode, setReadMode] = useState<string>('to_child');
     const [finishMode, setFinishMode] = useState<string>('to_child');
+    const [showDuePicker, setShowDuePicker] = useState(false);
     const [finishDate, setFinishDate] = useState('');
     const [showStartPicker, setShowStartPicker] = useState(false);
     const [startDate, setStartDate] = useState('');
@@ -107,6 +110,7 @@ export default function BookDetailModal({
             setNewShelf('');
             setFinishDate(isoToDateInput(new Date().toISOString()));
             setFinishMode('to_child');
+            setShowDuePicker(false);
             setShowStartPicker(false);
             setStartDate(isoToDateInput(new Date().toISOString()));
         }
@@ -246,6 +250,43 @@ export default function BookDetailModal({
                                </div>
                             </div>
                         </div>
+
+                        {/* Due date — only meaningful for a borrowed book. Reveal-then-confirm:
+                            the date input only opens the native picker on a direct tap. */}
+                        {!isOwned && onUpdateDueDate && (
+                            <div className="mb-6 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                                {book.due_date || showDuePicker ? (
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 text-indigo-700 font-bold text-sm shrink-0">
+                                            <Clock size={16} /> Return by
+                                        </div>
+                                        <input
+                                            type="date"
+                                            value={isoToDateInput(book.due_date)}
+                                            min={isoToDateInput(new Date().toISOString())}
+                                            onChange={(e) => onUpdateDueDate(String(book.id), e.target.value ? dateInputToIso(e.target.value) : null)}
+                                            className="flex-1 min-w-0 bg-white border border-indigo-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 focus:outline-none"
+                                            aria-label="Due date"
+                                        />
+                                        {book.due_date && (
+                                            <button
+                                                onClick={() => { onUpdateDueDate(String(book.id), null); setShowDuePicker(false); }}
+                                                className="text-xs font-bold text-slate-400 hover:text-rose-500 shrink-0"
+                                            >
+                                                Clear
+                                            </button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowDuePicker(true)}
+                                        className="flex items-center gap-2 text-indigo-600 font-bold text-sm"
+                                    >
+                                        <Clock size={16} /> Set a return date
+                                    </button>
+                                )}
+                            </div>
+                        )}
 
                         {/* Chapter book: start → finish tracking */}
                         {(onStartReading || activeReading) && (

@@ -42,6 +42,7 @@ export default function Home() {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   
   const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [libraryFocus, setLibraryFocus] = useState<{ id: string; nonce: number } | null>(null);
   const [showReaderMenu, setShowReaderMenu] = useState(false);
   
   const [activeReader, setActiveReader] = useState(''); 
@@ -439,12 +440,29 @@ export default function Home() {
       }
   };
   
-  const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => { 
+  const handleUpdateStatus = async (id: string, newStatus: 'owned' | 'borrowed') => {
+      // A due date only makes sense for a borrowed book; drop it when the book
+      // becomes owned.
+      const clearsDue = newStatus === 'owned';
       // Optimistic
-      setLibrary(prev => prev.map(b => b.id === id ? { ...b, ownership_status: newStatus } : b)); 
-      setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus }) : null); 
+      setLibrary(prev => prev.map(b => b.id === id ? { ...b, ownership_status: newStatus, ...(clearsDue ? { due_date: null } : {}) } : b));
+      setSelectedBook((prev) => prev ? ({ ...prev, ownershipStatus: newStatus, ...(clearsDue ? { due_date: null } : {}) }) : null);
       // DB
-      await supabase.from('library').update({ ownership_status: newStatus }).eq('id', id); 
+      await supabase.from('library').update({ ownership_status: newStatus, ...(clearsDue ? { due_date: null } : {}) }).eq('id', id);
+  };
+
+  const handleUpdateDueDate = async (id: string, due: string | null) => {
+      const prev = library.find(b => b.id === id)?.due_date ?? null;
+      // Optimistic
+      setLibrary(cur => cur.map(b => b.id === id ? { ...b, due_date: due } : b));
+      setSelectedBook(cur => cur ? { ...cur, due_date: due } : null);
+      // DB
+      const { error } = await supabase.from('library').update({ due_date: due }).eq('id', id);
+      if (error) {
+          setLibrary(cur => cur.map(b => b.id === id ? { ...b, due_date: prev } : b));
+          setSelectedBook(cur => cur ? { ...cur, due_date: prev } : null);
+          showToast("Couldn't update the due date.");
+      }
   };
 
   const handleUpdateWishlist = async (id: string, inWishlist: boolean) => {
@@ -706,6 +724,7 @@ export default function Home() {
             userId={session.user.id}
             onSelectBook={setSelectedBook}
             onUpdateOccasion={handleUpdateOccasion}
+            focusFilter={libraryFocus}
           />
         ) : activeTab === 'home' ? (
           <HomeView
@@ -716,6 +735,7 @@ export default function Home() {
             getBookCover={getBookCover}
             onSelectBook={setSelectedBook}
             onFinishReading={handleFinishReading}
+            onViewBorrowed={() => { setLibraryFocus({ id: 'borrowed', nonce: Date.now() }); setActiveTab('library'); }}
           />
         ) : (
           <HistoryView
@@ -786,8 +806,9 @@ export default function Home() {
         onReadAgain={handleReadAgain} 
         onRemove={handleRemoveBook} 
         onDeleteAsset={handleDeleteAsset} 
-        onUpdateStatus={handleUpdateStatus} 
-        onUpdateWishlist={handleUpdateWishlist} 
+        onUpdateStatus={handleUpdateStatus}
+        onUpdateDueDate={handleUpdateDueDate}
+        onUpdateWishlist={handleUpdateWishlist}
         onUpdateRating={handleUpdateRating} 
         onUpdateMemo={handleUpdateMemo}
         onUpdateShelves={handleUpdateShelves}

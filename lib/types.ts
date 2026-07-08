@@ -17,6 +17,7 @@ export interface Book {
   rating: number;
   memo: string | null;
   shelves?: string[];
+  due_date?: string | null;   // library due date (meaningful only when borrowed)
   created_at?: string;
 }
 
@@ -50,5 +51,6 @@ export interface DisplayItem {
   rating?: number;
   memo?: string;
   shelves?: string[];
+  due_date?: string | null;
   dailyCount?: number;
 }
