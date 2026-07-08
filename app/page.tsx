@@ -16,6 +16,11 @@ import MagicLogModal from '@/components/MagicLogModal';
 import YearInReview from '@/components/YearInReview';
 import { supabase } from '@/lib/supabaseClient';
 import { getStoredPin, storePin, clearStoredPin, PinRecord } from '@/lib/pin';
+import { uploadMemoryPhoto } from '@/lib/uploadMemoryPhoto';
+
+// A log id is "pending" (optimistic, not yet persisted) until the DB row swaps
+// in. Temp ids are prefixed with "temp"; guard edits that need a real row id.
+const isPendingLogId = (id: string | number) => typeof id === 'string' && id.startsWith('temp');
 
 import { MILESTONES } from '@/lib/constants';
 import type { Tab, Book, ReadingLog, DisplayItem } from '@/lib/types';
@@ -219,7 +224,7 @@ export default function Home() {
   const handleSaveAvatar = async (newAvatar: string) => { if (!editingAvatarFor) return; const newAvatars = { ...readerAvatars, [editingAvatarFor]: newAvatar }; setReaderAvatars(newAvatars); await supabase.from('profiles').update({ avatars: newAvatars }).eq('id', session.user.id); };
 
   // --- FIXED: ADD BOOK LOGIC (Optimistic Updates) ---
-  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string) => {
+  const handleAddBook = async (book: GoogleBook, selectedReaders: string[], status: 'owned' | 'borrowed' | 'wishlist', shouldLog: boolean, note: string, readDateIso?: string, quote: string = '', photoFile: File | null = null) => {
     setAddModalOpen(false);
     if (!session) return;
 
@@ -272,6 +277,7 @@ export default function Home() {
                 reader_name: reader,
                 timestamp,
                 notes: note || undefined,
+                quote: quote || undefined,
             };
         });
         setLogs(prev => [...newOptimisticLogs, ...prev]);
@@ -306,13 +312,21 @@ export default function Home() {
 
     // 5. BACKGROUND: Insert Logs to DB
     if (!isWishlist && shouldLog) {
+        // Upload the memory photo first (if any) so its URL goes in with the logs.
+        let photoUrl: string | null = null;
+        if (photoFile) {
+            try { photoUrl = await uploadMemoryPhoto(photoFile, session.user.id); }
+            catch { showToast("Saved, but the photo didn't upload."); }
+        }
         const newLogs = readersToAdd.map(reader => ({
             user_id: session.user.id,
             book_title: book.title,
             book_author: book.author,
             reader_name: reader,
             timestamp: timestamp,
-            notes: note || null
+            notes: note || null,
+            quote: quote || null,
+            photo_url: photoUrl,
         }));
 
         const { data: insertedLogs, error: logError } = await supabase.from('reading_logs').insert(newLogs).select();
@@ -468,6 +482,27 @@ export default function Home() {
       if (error) showToast("Couldn't update the date. Please try again.");
   };
 
+  // Attach a photo and/or quote to an existing read (Reading Memories).
+  const handleAddMemory = async (logId: string | number, memory: { quote?: string; file?: File | null }) => {
+      if (!session) return;
+      if (isPendingLogId(logId)) { showToast('Give that read a moment to save, then add the memory.'); return; }
+      const prevLog = logs.find(l => l.id === logId);
+      let photoUrl: string | null = prevLog?.photo_url ?? null;
+      if (memory.file) {
+          try { photoUrl = await uploadMemoryPhoto(memory.file, session.user.id); }
+          catch { showToast("The photo didn't upload. Please try again."); return; }
+      }
+      const quote = memory.quote?.trim() || prevLog?.quote || null;
+      // Optimistic
+      setLogs(prev => prev.map(l => l.id === logId ? { ...l, photo_url: photoUrl, quote } : l));
+      const { error } = await supabase.from('reading_logs').update({ photo_url: photoUrl, quote }).eq('id', logId);
+      if (error) {
+          // Roll back to the prior values.
+          setLogs(prev => prev.map(l => l.id === logId ? { ...l, photo_url: prevLog?.photo_url ?? null, quote: prevLog?.quote ?? null } : l));
+          showToast("Couldn't save that memory. Please try again.");
+      }
+  };
+
   // --- Chapter books ("Currently Reading") ---
   const handleStartReading = async (book: { title: string; author: string }, startIso: string) => {
       if (!session) return;
@@ -582,7 +617,7 @@ export default function Home() {
       // Only completed reads appear in history; in-progress chapter books show
       // in the "Currently reading" control instead.
       return logs.filter(l => l.book_title === selectedBook.title && l.timestamp).map(l => ({
-            id: l.id, title: l.book_title, author: l.book_author, reader: l.reader_name, timestamp: l.timestamp, notes: l.notes, started_at: l.started_at
+            id: l.id, title: l.book_title, author: l.book_author, reader: l.reader_name, timestamp: l.timestamp, notes: l.notes, started_at: l.started_at, photo_url: l.photo_url, quote: l.quote
         } as any)).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [selectedBook, logs]);
 
@@ -745,6 +780,7 @@ export default function Home() {
         onUpdateMemo={handleUpdateMemo}
         onUpdateShelves={handleUpdateShelves}
         onUpdateLogDate={handleUpdateLogDate}
+        onAddMemory={handleAddMemory}
         allShelves={uniqueShelves}
         activeReader={activeReader}
         activeReading={selectedBookActiveReading}

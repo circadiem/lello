@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { BookOpen, Plus } from 'lucide-react';
 import ReadingChart from '@/components/ReadingChart';
 import StreakCard from '@/components/StreakCard';
@@ -22,6 +22,11 @@ export default function HistoryView({
 }: HistoryViewProps) {
     const isDailyGoalMet = stats.dailyCount >= stats.goals.daily;
     const isWeeklyGoalMet = stats.weeklyCount >= stats.goals.weekly;
+
+    const [feedFilter, setFeedFilter] = useState<'all' | 'memories'>('all');
+    const memories = stats.readerLog
+        .filter((l: any) => l.photo_url || l.quote)
+        .sort((a: any, b: any) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
 
     const renderBookList = (items: any[], title: string) => (
         <div className="mb-6">
@@ -51,6 +56,28 @@ export default function HistoryView({
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
             <h1 className="text-4xl font-extrabold tracking-tight pt-4 mb-6">Activity</h1>
+            <div className="flex items-center gap-2 mb-6">
+                {(['all', 'memories'] as const).map(f => (
+                    <button key={f} onClick={() => setFeedFilter(f)} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all border ${feedFilter === f ? 'bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/20' : 'bg-white text-slate-500 border-slate-200'}`}>{f === 'all' ? 'All' : 'Memories'}</button>
+                ))}
+            </div>
+            {feedFilter === 'memories' ? (
+                memories.length > 0 ? (
+                    <div className="space-y-4">
+                        {memories.map((m: any) => (
+                            <div key={m.id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+                                {m.photo_url && <img src={m.photo_url} className="w-full aspect-[4/3] object-cover" alt="Memory" />}
+                                <div className="p-5">
+                                    {m.quote && <p className="text-lg italic text-slate-700 leading-snug mb-3" style={{ fontFamily: 'Georgia, serif' }}>&ldquo;{m.quote}&rdquo;</p>}
+                                    <p className="text-xs font-bold text-slate-400">{m.book_title} · {m.reader_name} · {m.timestamp ? new Date(m.timestamp).toLocaleDateString() : ''}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="text-center py-12 px-6 text-slate-400 text-sm font-medium">Capture the funny moments — add a photo or quote when you log a read.</div>
+                )
+            ) : (<>
             <ReadingChart data={chartData} />
             <div className="mb-6"><StreakCard current={streak.current} longest={streak.longest} readerName={activeReader} /></div>
             <div className="space-y-4 mb-8">
@@ -67,6 +94,7 @@ export default function HistoryView({
             {groupedHistory.yesterday.length > 0 && renderBookList(groupedHistory.yesterday, 'Yesterday')}
             {groupedHistory.week.length > 0 && renderBookList(groupedHistory.week, 'Earlier This Week')}
             {stats.readerLog.length === 0 && (<div className="text-center py-10 text-slate-400 text-sm font-medium">No reading activity yet. Start logging some books!</div>)}
+            </>)}
         </div>
     );
 }

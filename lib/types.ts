@@ -30,6 +30,8 @@ export interface ReadingLog {
   count?: number;
   notes?: string;
   started_at?: string | null; // set for chapter books (start date)
+  photo_url?: string | null;  // Reading Memories: attached photo
+  quote?: string | null;      // Reading Memories: memorable quote
 }
 
 export interface DisplayItem {
