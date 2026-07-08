@@ -83,6 +83,8 @@ export default function BookDetailModal({
     const [shelves, setShelves] = useState<string[]>(book?.shelves || []);
     const [newShelf, setNewShelf] = useState('');
     const [finishDate, setFinishDate] = useState('');
+    const [showStartPicker, setShowStartPicker] = useState(false);
+    const [startDate, setStartDate] = useState('');
 
     useEffect(() => {
         if (book) {
@@ -91,6 +93,8 @@ export default function BookDetailModal({
             setShelves(book.shelves || []);
             setNewShelf('');
             setFinishDate(isoToDateInput(new Date().toISOString()));
+            setShowStartPicker(false);
+            setStartDate(isoToDateInput(new Date().toISOString()));
         }
     }, [book]);
 
@@ -270,9 +274,38 @@ export default function BookDetailModal({
                                             Cancel tracking
                                         </button>
                                     </div>
+                                ) : showStartPicker ? (
+                                    <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl">
+                                        <div className="flex items-center gap-2 text-amber-700 font-bold text-sm mb-3">
+                                            <BookMarked size={16} /> When did you start?
+                                        </div>
+                                        <div className="flex gap-2 items-center">
+                                            <input
+                                                type="date"
+                                                value={startDate}
+                                                max={isoToDateInput(new Date().toISOString())}
+                                                onChange={(e) => e.target.value && setStartDate(e.target.value)}
+                                                className="flex-1 bg-white border border-amber-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 focus:outline-none"
+                                                aria-label="Start date"
+                                            />
+                                            <button
+                                                onClick={() => {
+                                                    if (!startDate) return;
+                                                    onStartReading?.({ title: book.title, author: book.author }, dateInputToIso(startDate));
+                                                    setShowStartPicker(false);
+                                                }}
+                                                className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold active:scale-95 transition-transform"
+                                            >
+                                                Start
+                                            </button>
+                                        </div>
+                                        <button onClick={() => setShowStartPicker(false)} className="mt-2 text-xs font-bold text-slate-400 hover:text-slate-600">
+                                            Cancel
+                                        </button>
+                                    </div>
                                 ) : (
                                     <button
-                                        onClick={() => onStartReading?.({ title: book.title, author: book.author }, new Date().toISOString())}
+                                        onClick={() => setShowStartPicker(true)}
                                         className="w-full py-3 rounded-2xl bg-amber-50 text-amber-700 border border-amber-100 font-bold text-sm flex items-center justify-center gap-2 hover:bg-amber-100 transition-colors"
                                     >
                                         <BookMarked size={16} /> Start as chapter book
