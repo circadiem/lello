@@ -248,8 +248,8 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
       const isWishlist = ownershipStatus === 'wishlist';
       
       return (
-        <div className="p-6 animate-in slide-in-from-right-8 duration-300 space-y-6">
-            
+        <div className="flex-1 min-h-0 overflow-y-auto p-6 animate-in slide-in-from-right-8 duration-300 space-y-6">
+
             {/* Book Summary */}
             <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100">
                 <div className="w-16 h-24 shrink-0 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200 flex items-center justify-center text-slate-300">
