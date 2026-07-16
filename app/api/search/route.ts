@@ -14,6 +14,29 @@ function toGoogleQuery(raw: string): string {
   return q;
 }
 
+// Google Books throws transient 503s (often when it can't geo-locate a
+// serverless caller). Retry a few times with backoff before giving up.
+// Config problems (400/403 — bad key / quota) fail fast so they surface.
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
+
+async function fetchWithRetry(
+  url: string,
+  init?: RequestInit,
+  retries = 3,
+  delays = [300, 800, 1500]
+): Promise<Response> {
+  let lastResponse: Response | null = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url, init);
+    if (!RETRYABLE_STATUSES.has(res.status)) return res;
+    lastResponse = res;
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, delays[attempt] ?? 1500));
+    }
+  }
+  return lastResponse!;
+}
+
 export async function POST(req: Request) {
   try {
     const { query } = await req.json();
@@ -25,43 +48,27 @@ export async function POST(req: Request) {
 
     if (!googleKey) {
       console.error('SERVER: Missing Google Books API Key');
-      return NextResponse.json({
-        results: [
-          {
-            id: 'error-key',
-            title: '⚠️ Configuration Error',
-            author: 'Missing Google Books API key on the server',
-            coverUrl: null,
-            rating: 0,
-            popularity: 0,
-          },
-        ],
-      });
+      return NextResponse.json(
+        { error: 'google_books_misconfigured' },
+        { status: 500 }
+      );
     }
 
     if (!query) return NextResponse.json({ results: [] });
 
     const googleQuery = toGoogleQuery(query);
 
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(
         googleQuery
-      )}&key=${googleKey}&maxResults=20&printType=books`
+      )}&country=US&key=${googleKey}&maxResults=20&printType=books`
     );
 
     if (!res.ok) {
-      return NextResponse.json({
-        results: [
-          {
-            id: 'error-google',
-            title: `⚠️ Google Error: ${res.status}`,
-            author: 'Check quota or key validity',
-            coverUrl: null,
-            rating: 0,
-            popularity: 0,
-          },
-        ],
-      });
+      return NextResponse.json(
+        { error: 'google_books_unavailable', status: res.status },
+        { status: 502 }
+      );
     }
 
     const data = await res.json();
@@ -89,17 +96,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ results });
   } catch (error: any) {
-    return NextResponse.json({
-      results: [
-        {
-          id: 'error-crash',
-          title: '⚠️ Server Crash',
-          author: error.message,
-          coverUrl: null,
-          rating: 0,
-          popularity: 0,
-        },
-      ],
-    });
+    console.error('SERVER: Book search crashed', error);
+    return NextResponse.json(
+      { error: 'server_error' },
+      { status: 500 }
+    );
   }
 }
