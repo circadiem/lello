@@ -168,8 +168,9 @@ export default function AddBookModal({ isOpen, onClose, onAdd, readers, activeRe
            
            {error && (
                <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-sm font-bold flex items-center gap-2 animate-in slide-in-from-top-2">
-                   <AlertCircle size={18} />
-                   <span>{error}</span>
+                   <AlertCircle size={18} className="shrink-0" />
+                   <span className="flex-1">{error}</span>
+                   <button onClick={() => searchBooks(query)} className="shrink-0 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold active:scale-95 transition-transform">Try again</button>
                </div>
            )}
         </div>
